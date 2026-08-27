@@ -36,6 +36,7 @@ add_executable(search
   src/index.cpp
   src/query.cpp
   src/evaluator.cpp
+  src/ranking.cpp
 )
 
 target_include_directories(search PRIVATE src)

@@ -12,6 +12,7 @@
 void InvertedIndex::add_document(std::string doc_id, const std::vector<Token>& terms) {
     const std::size_t ordinal = document_ids_.size();
     document_ids_.push_back(std::move(doc_id));
+    document_lengths_.push_back(terms.size());
 
     for (const Token& token : terms) {
         std::vector<Posting>& postings = postings_[token.text];
@@ -49,6 +50,22 @@ const std::vector<Posting>& InvertedIndex::postings(std::string_view term) const
 
     const auto it = postings_.find(std::string(term));
     return it == postings_.end() ? kEmpty : it->second;
+}
+
+std::size_t InvertedIndex::document_length(std::size_t doc_id) const {
+    return doc_id < document_lengths_.size() ? document_lengths_[doc_id] : 0;
+}
+
+double InvertedIndex::average_document_length() const {
+    if (document_lengths_.empty()) {
+        return 0.0;
+    }
+
+    std::size_t total = 0;
+    for (const std::size_t length : document_lengths_) {
+        total += length;
+    }
+    return static_cast<double>(total) / static_cast<double>(document_lengths_.size());
 }
 
 const std::vector<std::string>& InvertedIndex::document_ids() const {

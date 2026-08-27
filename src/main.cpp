@@ -1,6 +1,8 @@
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -12,6 +14,7 @@
 #include "index.hpp"
 #include "normalize.hpp"
 #include "query.hpp"
+#include "ranking.hpp"
 #include "stemmer.hpp"
 #include "stopwords.hpp"
 #include "tokenizer.hpp"
@@ -48,7 +51,12 @@ int usage() {
                  "  andnot <corpus_dir> <word> <word>\n"
                  "                               documents containing the first but not the second\n"
                  "  phrase <corpus_dir> <text>   documents containing the words consecutively\n"
-                 "  match <corpus_dir> <query>   documents matching a boolean query\n";
+                 "  match <corpus_dir> <query>   documents matching a boolean query\n"
+                 "  lengths <corpus_dir>         indexed length of each document\n"
+                 "  tfidf <corpus_dir> <word>... rank documents by TF-IDF\n"
+                 "  bm25 <corpus_dir> <word>...  rank documents by BM25\n"
+                 "  top [--bm25] <corpus_dir> <k> <word>...\n"
+                 "                               the k highest scoring documents\n";
     return 2;
 }
 
@@ -266,6 +274,105 @@ int cmd_phrase(const std::vector<std::string>& args) {
         return 1;
     }
     return run_parsed_query(args, "\"" + args[1] + "\"");
+}
+
+int cmd_lengths(const std::vector<std::string>& args) {
+    if (args.size() != 1) {
+        return usage();
+    }
+
+    const std::filesystem::path corpus_dir = args[0];
+    std::error_code ec;
+    if (!std::filesystem::is_directory(corpus_dir, ec)) {
+        return reject_missing_corpus(corpus_dir);
+    }
+
+    const InvertedIndex index = build_index(corpus_dir);
+    const std::vector<std::string>& ids = index.document_ids();
+    for (std::size_t doc_id = 0; doc_id < ids.size(); doc_id++) {
+        std::cout << ids[doc_id] << " " << index.document_length(doc_id) << "\n";
+    }
+
+    std::cout << "average " << std::fixed << std::setprecision(2)
+              << index.average_document_length() << "\n";
+    return 0;
+}
+
+void print_ranking(const InvertedIndex& index, const std::vector<ScoredDocument>& ranking) {
+    const std::vector<std::string>& ids = index.document_ids();
+    std::cout << std::fixed << std::setprecision(4);
+    for (const ScoredDocument& scored : ranking) {
+        std::cout << ids[scored.doc_id] << " " << scored.score << "\n";
+    }
+}
+
+template <typename Scorer>
+int run_ranking(const std::vector<std::string>& args, Scorer scorer) {
+    if (args.size() < 2) {
+        return usage();
+    }
+
+    const std::filesystem::path corpus_dir = args[0];
+    std::error_code ec;
+    if (!std::filesystem::is_directory(corpus_dir, ec)) {
+        return reject_missing_corpus(corpus_dir);
+    }
+
+    const InvertedIndex index = build_index(corpus_dir);
+    const std::vector<std::string> terms =
+        query_terms(std::vector<std::string>(args.begin() + 1, args.end()));
+
+    print_ranking(index, scorer(terms, index));
+    return 0;
+}
+
+int cmd_tfidf(const std::vector<std::string>& args) {
+    return run_ranking(args, score_tfidf);
+}
+
+int cmd_bm25(const std::vector<std::string>& args) {
+    return run_ranking(args, score_bm25);
+}
+
+int cmd_top(const std::vector<std::string>& args) {
+    std::vector<std::string> rest = args;
+    bool use_bm25 = false;
+    if (!rest.empty() && rest.front() == "--bm25") {
+        use_bm25 = true;
+        rest.erase(rest.begin());
+    }
+    if (rest.size() < 3) {
+        return usage();
+    }
+
+    const std::filesystem::path corpus_dir = rest[0];
+    std::error_code ec;
+    if (!std::filesystem::is_directory(corpus_dir, ec)) {
+        return reject_missing_corpus(corpus_dir);
+    }
+
+    std::size_t k = 0;
+    try {
+        std::size_t consumed = 0;
+        const long long parsed = std::stoll(rest[1], &consumed);
+        if (consumed != rest[1].size() || parsed < 0) {
+            throw std::invalid_argument("k");
+        }
+        k = static_cast<std::size_t>(parsed);
+    } catch (const std::exception&) {
+        std::cerr << "search: k must be a non-negative integer: " << rest[1] << "\n";
+        return 1;
+    }
+
+    const InvertedIndex index = build_index(corpus_dir);
+    const std::vector<std::string> terms =
+        query_terms(std::vector<std::string>(rest.begin() + 2, rest.end()));
+
+    const std::vector<ScoredDocument> ranking =
+        use_bm25 ? score_bm25(terms, index) : score_tfidf(terms, index);
+
+    print_ranking(index, top_k(ranking, k));
+    return 0;
 }
 
 int cmd_lex(const std::vector<std::string>& args) {
@@ -576,6 +683,18 @@ int main(int argc, char** argv) {
     }
     if (command == "match") {
         return cmd_match(rest);
+    }
+    if (command == "lengths") {
+        return cmd_lengths(rest);
+    }
+    if (command == "tfidf") {
+        return cmd_tfidf(rest);
+    }
+    if (command == "bm25") {
+        return cmd_bm25(rest);
+    }
+    if (command == "top") {
+        return cmd_top(rest);
     }
     if (command == "analyze-doc") {
         return cmd_analyze_doc(rest);

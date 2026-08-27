@@ -56,6 +56,18 @@ public:
     // looking up "Cats" finds nothing, because what was indexed is "cat".
     const std::vector<Posting>& postings(std::string_view term) const;
 
+    // How many term occurrences a document contributed, counting repeats.
+    //
+    // This is the length of the analyzed term stream, not the document's word
+    // count: stopwords were already dropped before the index saw it. Ranking
+    // needs a length that matches what was indexed, so that is the right one.
+    std::size_t document_length(std::size_t doc_id) const;
+
+    // Mean document length across the corpus, or 0 for an empty one. BM25
+    // divides by this to decide whether a document is long or short relative
+    // to its peers.
+    double average_document_length() const;
+
     // String ids, in the order the documents were added.
     const std::vector<std::string>& document_ids() const;
 
@@ -64,6 +76,7 @@ public:
 
 private:
     std::vector<std::string> document_ids_;
+    std::vector<std::size_t> document_lengths_;
     std::unordered_map<std::string, std::vector<Posting>> postings_;
 };
 
