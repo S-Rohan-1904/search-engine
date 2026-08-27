@@ -1,0 +1,3 @@
+title: mike
+
+A tiny document named mike.

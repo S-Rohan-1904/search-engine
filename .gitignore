@@ -1,0 +1,9 @@
+build/
+compile_commands.json
+.cache/
+.DS_Store
+__pycache__/
+*.pyc
+index.bin
+*.idx
+MY_NOTES.md

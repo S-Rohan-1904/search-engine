@@ -1,0 +1,3 @@
+title: Relational Databases
+
+A relational database stores tables of data. The relation between two tables is defined by a key and queries read those tables.

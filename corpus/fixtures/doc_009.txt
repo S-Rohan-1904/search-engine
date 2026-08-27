@@ -1,0 +1,3 @@
+title: Learning to Program
+
+Learning to program takes practice. A programmer writes code every day and that code runs on a computer somewhere.

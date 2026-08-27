@@ -1,0 +1,3 @@
+title: Threads and Parallelism
+
+A thread runs code in parallel with other threads. Parallel programs are faster but sharing memory between threads is hard.

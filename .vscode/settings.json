@@ -1,0 +1,4 @@
+{
+  "C_Cpp.default.compilerPath": "/opt/homebrew/bin/g++-15",
+  "C_Cpp.default.cppStandard": "c++20"
+}

@@ -1,0 +1,3 @@
+title: Gamma Document
+
+The third tiny document mentions a cat and a dog.

@@ -1,0 +1,5 @@
+title: Two Paragraphs
+
+The first paragraph talks about the index.
+
+The second paragraph talks about the query.

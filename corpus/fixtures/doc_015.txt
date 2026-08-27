@@ -1,0 +1,3 @@
+title: Compiling Code
+
+The compiler reads source code and produces a binary program. Compiling a large program can be slow on an old computer.

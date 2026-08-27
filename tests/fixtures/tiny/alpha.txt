@@ -1,0 +1,3 @@
+title: Alpha Document
+
+The first tiny document mentions a cat.

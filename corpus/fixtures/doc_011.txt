@@ -1,0 +1,3 @@
+title: Sorting Algorithms
+
+Sorting an array is a common task. The merge sort algorithm splits the array in half and merges the sorted halves together again.

@@ -1,0 +1,3 @@
+title: Searching Text
+
+Searching a large text is slow without an index. An index maps each word to the documents that contain the word.

@@ -1,0 +1,3 @@
+title: Computers and Memory
+
+A computer has memory and a processor. Computers store data in memory and read that data very quickly when a program asks for it.

@@ -1,0 +1,3 @@
+title: alpha
+
+A tiny document named alpha.

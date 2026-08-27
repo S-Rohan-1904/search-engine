@@ -1,0 +1,3 @@
+title: Buried
+
+This document is in a subdirectory and must be ignored.

@@ -1,0 +1,3 @@
+title: Rockets and Launches
+
+A rocket burns fuel to escape the earth. The launch of a large rocket needs good weather and careful planning.

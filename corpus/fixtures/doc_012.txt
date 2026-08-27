@@ -1,0 +1,3 @@
+title: Hash Tables
+
+A hash table maps a key to a value. Hashing is fast and a good hash function spreads the keys across the table evenly.

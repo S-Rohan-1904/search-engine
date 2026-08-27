@@ -1,0 +1,3 @@
+title: Telescopes
+
+A telescope collects light from distant stars. Larger telescopes see fainter objects and astronomers study those images for years.
