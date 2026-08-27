@@ -75,6 +75,10 @@ struct ParseResult {
 // Parentheses override it. Two operands with no operator between them are
 // joined by AND, so `cat dog` means both words, which is what a searcher
 // typing into a box expects.
+//
+// Nesting is capped at 256 levels. The parser is recursive descent and the
+// tree is walked recursively everywhere downstream, so an unbounded depth
+// would let a pathological query exhaust the stack.
 ParseResult parse_query(std::string_view query);
 
 // Renders a tree as an S-expression: (or (term cat) (and (term dog) (term bird)))

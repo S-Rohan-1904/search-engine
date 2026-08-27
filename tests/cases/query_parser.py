@@ -127,4 +127,21 @@ CASES = [
         "exit_code": 2,
         "stderr_not_empty": True,
     },
+    {
+        "name": "deeply but legally nested parentheses parse",
+        "argv": ["parse", "(" * 200 + "cat" + ")" * 200],
+        "stdout": "(term cat)",
+    },
+    {
+        "name": "nesting past the depth limit is rejected rather than crashing",
+        "argv": ["parse", "(" * 300 + "cat" + ")" * 300],
+        "exit_code": 1,
+        "stderr_not_empty": True,
+    },
+    {
+        "name": "a NOT chain past the depth limit is rejected too",
+        "argv": ["parse", "NOT " * 300 + "cat"],
+        "exit_code": 1,
+        "stderr_not_empty": True,
+    },
 ]

@@ -1,6 +1,7 @@
 #include "query.hpp"
 
 #include <cctype>
+#include <cstddef>
 #include <utility>
 
 namespace {
@@ -75,6 +76,20 @@ bool lex_query(std::string_view query, std::vector<QueryToken>& out, std::string
 }
 
 namespace {
+
+constexpr std::size_t kMaxQueryDepth = 256;
+
+class DepthGuard {
+public:
+    explicit DepthGuard(std::size_t& depth) : depth_(depth) { depth_++; }
+    ~DepthGuard() { depth_--; }
+
+    DepthGuard(const DepthGuard&) = delete;
+    DepthGuard& operator=(const DepthGuard&) = delete;
+
+private:
+    std::size_t& depth_;
+};
 
 class Parser {
 public:
@@ -168,6 +183,12 @@ private:
     }
 
     std::unique_ptr<QueryNode> parse_unary() {
+        const DepthGuard guard(depth_);
+        if (depth_ > kMaxQueryDepth) {
+            error_ = "query nested too deeply";
+            return nullptr;
+        }
+
         if (peek_is(QueryTokenKind::Not)) {
             position_++;
             std::unique_ptr<QueryNode> operand = parse_unary();
@@ -224,6 +245,7 @@ private:
 
     const std::vector<QueryToken>& tokens_;
     std::size_t position_ = 0;
+    std::size_t depth_ = 0;
     std::string error_;
 };
 

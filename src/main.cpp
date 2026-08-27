@@ -8,6 +8,7 @@
 #include "analyzer.hpp"
 #include "corpus.hpp"
 #include "document.hpp"
+#include "evaluator.hpp"
 #include "index.hpp"
 #include "normalize.hpp"
 #include "query.hpp"
@@ -41,7 +42,13 @@ int usage() {
                  "  tf <corpus_dir> <word>       per-document counts for a word\n"
                  "  positions <corpus_dir> <word> token positions of a word per document\n"
                  "  lex <query>                  split a query into syntactic tokens\n"
-                 "  parse <query>                parse a query into a boolean tree\n";
+                 "  parse <query>                parse a query into a boolean tree\n"
+                 "  and <corpus_dir> <word>...   documents containing every word\n"
+                 "  or <corpus_dir> <word>...    documents containing any of the words\n"
+                 "  andnot <corpus_dir> <word> <word>\n"
+                 "                               documents containing the first but not the second\n"
+                 "  phrase <corpus_dir> <text>   documents containing the words consecutively\n"
+                 "  match <corpus_dir> <query>   documents matching a boolean query\n";
     return 2;
 }
 
@@ -153,6 +160,112 @@ void print_terms(const std::vector<Token>& tokens) {
     for (const Token& token : tokens) {
         std::cout << token.position << " " << token.offset << " " << token.text << "\n";
     }
+}
+
+void print_document_ids(const InvertedIndex& index, const std::vector<std::size_t>& matches) {
+    const std::vector<std::string>& ids = index.document_ids();
+    for (const std::size_t doc_id : matches) {
+        std::cout << ids[doc_id] << "\n";
+    }
+}
+
+bool literal_doc_ids(const InvertedIndex& index, const std::string& word,
+                     std::vector<std::size_t>& out) {
+    const std::vector<Token> terms = analyze(word);
+    if (terms.size() > 1) {
+        std::cerr << "search: not a single term: " << word << "\n";
+        return false;
+    }
+
+    out.clear();
+    if (!terms.empty()) {
+        for (const Posting& posting : index.postings(terms.front().text)) {
+            out.push_back(posting.doc_id);
+        }
+    }
+    return true;
+}
+
+template <typename Combine>
+int run_set_query(const std::vector<std::string>& args, std::size_t min_words, Combine combine) {
+    if (args.size() < min_words + 1) {
+        return usage();
+    }
+
+    const std::filesystem::path corpus_dir = args[0];
+    std::error_code ec;
+    if (!std::filesystem::is_directory(corpus_dir, ec)) {
+        return reject_missing_corpus(corpus_dir);
+    }
+
+    const InvertedIndex index = build_index(corpus_dir);
+
+    std::vector<std::size_t> result;
+    if (!literal_doc_ids(index, args[1], result)) {
+        return 1;
+    }
+
+    for (std::size_t i = 2; i < args.size(); i++) {
+        std::vector<std::size_t> next;
+        if (!literal_doc_ids(index, args[i], next)) {
+            return 1;
+        }
+        result = combine(result, next);
+    }
+
+    print_document_ids(index, result);
+    return 0;
+}
+
+int cmd_and(const std::vector<std::string>& args) {
+    return run_set_query(args, 2, intersect);
+}
+
+int cmd_or(const std::vector<std::string>& args) {
+    return run_set_query(args, 2, unite);
+}
+
+int cmd_andnot(const std::vector<std::string>& args) {
+    if (args.size() != 3) {
+        return usage();
+    }
+    return run_set_query(args, 2, subtract);
+}
+
+int run_parsed_query(const std::vector<std::string>& args, const std::string& query) {
+    const std::filesystem::path corpus_dir = args[0];
+    std::error_code ec;
+    if (!std::filesystem::is_directory(corpus_dir, ec)) {
+        return reject_missing_corpus(corpus_dir);
+    }
+
+    const ParseResult parsed = parse_query(query);
+    if (!parsed.root) {
+        std::cerr << "search: " << parsed.error << "\n";
+        return 1;
+    }
+
+    const InvertedIndex index = build_index(corpus_dir);
+    print_document_ids(index, evaluate(*parsed.root, index));
+    return 0;
+}
+
+int cmd_match(const std::vector<std::string>& args) {
+    if (args.size() != 2) {
+        return usage();
+    }
+    return run_parsed_query(args, args[1]);
+}
+
+int cmd_phrase(const std::vector<std::string>& args) {
+    if (args.size() != 2) {
+        return usage();
+    }
+    if (args[1].find('"') != std::string::npos) {
+        std::cerr << "search: a phrase may not contain a quote\n";
+        return 1;
+    }
+    return run_parsed_query(args, "\"" + args[1] + "\"");
 }
 
 int cmd_lex(const std::vector<std::string>& args) {
@@ -448,6 +561,21 @@ int main(int argc, char** argv) {
     }
     if (command == "parse") {
         return cmd_parse(rest);
+    }
+    if (command == "and") {
+        return cmd_and(rest);
+    }
+    if (command == "or") {
+        return cmd_or(rest);
+    }
+    if (command == "andnot") {
+        return cmd_andnot(rest);
+    }
+    if (command == "phrase") {
+        return cmd_phrase(rest);
+    }
+    if (command == "match") {
+        return cmd_match(rest);
     }
     if (command == "analyze-doc") {
         return cmd_analyze_doc(rest);
