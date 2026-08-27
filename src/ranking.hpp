@@ -55,6 +55,26 @@ std::vector<ScoredDocument> score_tfidf(const std::vector<std::string>& terms,
 std::vector<ScoredDocument> score_bm25(const std::vector<std::string>& terms,
                                        const InvertedIndex& index);
 
+// Which scoring function to use.
+enum class Scorer {
+    TfIdf,
+    Bm25,
+};
+
+// Scores on several threads, with a result identical to the single-threaded
+// scorers for any thread count.
+//
+// The document id space is split into contiguous shards, one per thread, and
+// each shard is scored independently. Sharding by document rather than by term
+// is what keeps the result identical: a document's score is summed by exactly
+// one thread, in the same term order every time, so no floating-point addition
+// ever changes order. Splitting the terms across threads instead would require
+// adding partial sums together, and floating-point addition is not associative,
+// so the last bits would depend on the thread count.
+std::vector<ScoredDocument> score(const std::vector<std::string>& terms,
+                                  const InvertedIndex& index, Scorer scorer,
+                                  std::size_t threads);
+
 // The k highest-scoring entries, in the same order the scorers produce.
 //
 // Keeps a min-heap of the k best seen so far, so the cost is O(n log k) rather

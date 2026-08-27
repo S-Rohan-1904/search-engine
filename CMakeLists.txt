@@ -24,6 +24,8 @@ if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
   endif()
 endif()
 
+find_package(Threads REQUIRED)
+
 add_executable(search
   src/main.cpp
   src/corpus.cpp
@@ -38,7 +40,9 @@ add_executable(search
   src/evaluator.cpp
   src/ranking.cpp
   src/index_io.cpp
+  src/thread_pool.cpp
 )
 
 target_include_directories(search PRIVATE src)
+target_link_libraries(search PRIVATE Threads::Threads)
 target_compile_options(search PRIVATE -Wall -Wextra)

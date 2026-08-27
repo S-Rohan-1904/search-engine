@@ -16,6 +16,8 @@
 #include "normalize.hpp"
 #include "query.hpp"
 #include "ranking.hpp"
+#include "thread_pool.hpp"
+#include "thread_pool.hpp"
 #include "stemmer.hpp"
 #include "stopwords.hpp"
 #include "tokenizer.hpp"
@@ -54,13 +56,16 @@ int usage() {
                  "  phrase <corpus_dir> <text>   documents containing the words consecutively\n"
                  "  match <corpus_dir> <query>   documents matching a boolean query\n"
                  "  lengths <corpus_dir>         indexed length of each document\n"
-                 "  tfidf <corpus_dir> <word>... rank documents by TF-IDF\n"
-                 "  bm25 <corpus_dir> <word>...  rank documents by BM25\n"
-                 "  top [--bm25] <corpus_dir> <k> <word>...\n"
+                 "  tfidf [--threads <n>] <source> <word>...\n"
+                 "                               rank documents by TF-IDF\n"
+                 "  bm25 [--threads <n>] <source> <word>...\n"
+                 "                               rank documents by BM25\n"
+                 "  top [--bm25] [--threads <n>] <source> <k> <word>...\n"
                  "                               the k highest scoring documents\n"
-                 "  index-write [--encoding <name>] <source> <file>\n"
+                 "  index-write [--encoding <name>] [--threads <n>] <source> <file>\n"
                  "                               save an index to disk\n"
                  "  index-size <source>          encoded size under each encoding\n"
+                 "  pool-sum <threads> <n>       sum of squares below n, on a thread pool\n"
                  "\n"
                  "<source> is a corpus directory or a saved index file.\n";
     return 2;
@@ -72,10 +77,37 @@ int reject_missing_corpus(const std::filesystem::path& corpus_dir) {
     return 1;
 }
 
-std::optional<InvertedIndex> open_index(const std::filesystem::path& source) {
+bool parse_count(const std::string& text, std::size_t& out) {
+    try {
+        std::size_t consumed = 0;
+        const long long parsed = std::stoll(text, &consumed);
+        if (consumed != text.size() || parsed < 0) {
+            return false;
+        }
+        out = static_cast<std::size_t>(parsed);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool take_threads(std::vector<std::string>& args, std::size_t& threads) {
+    if (args.size() < 2 || args.front() != "--threads") {
+        return true;
+    }
+    if (!parse_count(args[1], threads) || threads == 0) {
+        std::cerr << "search: threads must be a positive integer: " << args[1] << "\n";
+        return false;
+    }
+    args.erase(args.begin(), args.begin() + 2);
+    return true;
+}
+
+std::optional<InvertedIndex> open_index(const std::filesystem::path& source,
+                                        std::size_t threads = 1) {
     std::error_code ec;
     if (std::filesystem::is_directory(source, ec)) {
-        return build_index(source);
+        return build_index_parallel(source, threads);
     }
 
     if (std::filesystem::is_regular_file(source, ec)) {
@@ -298,6 +330,40 @@ int cmd_phrase(const std::vector<std::string>& args) {
     return run_parsed_query(args, "\"" + args[1] + "\"");
 }
 
+int cmd_pool_sum(const std::vector<std::string>& args) {
+    if (args.size() != 2) {
+        return usage();
+    }
+
+    std::size_t threads = 0;
+    std::size_t count = 0;
+    if (!parse_count(args[0], threads) || threads == 0) {
+        std::cerr << "search: threads must be a positive integer: " << args[0] << "\n";
+        return 1;
+    }
+    if (!parse_count(args[1], count)) {
+        std::cerr << "search: count must be a non-negative integer: " << args[1] << "\n";
+        return 1;
+    }
+
+    ThreadPool pool(threads);
+    std::vector<std::future<std::size_t>> pending;
+    pending.reserve(count);
+    for (std::size_t i = 0; i < count; i++) {
+        pending.push_back(pool.submit([i] { return i * i; }));
+    }
+
+    std::size_t total = 0;
+    for (std::future<std::size_t>& future : pending) {
+        total += future.get();
+    }
+
+    std::cout << "threads " << pool.size() << "\n"
+              << "tasks " << count << "\n"
+              << "sum " << total << "\n";
+    return 0;
+}
+
 int cmd_index_write(const std::vector<std::string>& args) {
     std::vector<std::string> rest = args;
     IndexEncoding encoding = IndexEncoding::VarByte;
@@ -310,11 +376,15 @@ int cmd_index_write(const std::vector<std::string>& args) {
         encoding = *parsed;
         rest.erase(rest.begin(), rest.begin() + 2);
     }
+    std::size_t threads = 1;
+    if (!take_threads(rest, threads)) {
+        return 1;
+    }
     if (rest.size() != 2) {
         return usage();
     }
 
-    const std::optional<InvertedIndex> opened = open_index(rest[0]);
+    const std::optional<InvertedIndex> opened = open_index(rest[0], threads);
     if (!opened.has_value()) {
         return 1;
     }
@@ -393,31 +463,35 @@ void print_ranking(const InvertedIndex& index, const std::vector<ScoredDocument>
     }
 }
 
-template <typename Scorer>
 int run_ranking(const std::vector<std::string>& args, Scorer scorer) {
-    if (args.size() < 2) {
+    std::vector<std::string> rest = args;
+    std::size_t threads = 1;
+    if (!take_threads(rest, threads)) {
+        return 1;
+    }
+    if (rest.size() < 2) {
         return usage();
     }
 
-    const std::optional<InvertedIndex> opened = open_index(args[0]);
+    const std::optional<InvertedIndex> opened = open_index(rest[0], threads);
     if (!opened.has_value()) {
         return 1;
     }
     const InvertedIndex& index = *opened;
 
     const std::vector<std::string> terms =
-        query_terms(std::vector<std::string>(args.begin() + 1, args.end()));
+        query_terms(std::vector<std::string>(rest.begin() + 1, rest.end()));
 
-    print_ranking(index, scorer(terms, index));
+    print_ranking(index, score(terms, index, scorer, threads));
     return 0;
 }
 
 int cmd_tfidf(const std::vector<std::string>& args) {
-    return run_ranking(args, score_tfidf);
+    return run_ranking(args, Scorer::TfIdf);
 }
 
 int cmd_bm25(const std::vector<std::string>& args) {
-    return run_ranking(args, score_bm25);
+    return run_ranking(args, Scorer::Bm25);
 }
 
 int cmd_top(const std::vector<std::string>& args) {
@@ -427,25 +501,22 @@ int cmd_top(const std::vector<std::string>& args) {
         use_bm25 = true;
         rest.erase(rest.begin());
     }
+    std::size_t threads = 1;
+    if (!take_threads(rest, threads)) {
+        return 1;
+    }
     if (rest.size() < 3) {
         return usage();
     }
 
-    const std::optional<InvertedIndex> opened = open_index(rest[0]);
+    const std::optional<InvertedIndex> opened = open_index(rest[0], threads);
     if (!opened.has_value()) {
         return 1;
     }
     const InvertedIndex& index = *opened;
 
     std::size_t k = 0;
-    try {
-        std::size_t consumed = 0;
-        const long long parsed = std::stoll(rest[1], &consumed);
-        if (consumed != rest[1].size() || parsed < 0) {
-            throw std::invalid_argument("k");
-        }
-        k = static_cast<std::size_t>(parsed);
-    } catch (const std::exception&) {
+    if (!parse_count(rest[1], k)) {
         std::cerr << "search: k must be a non-negative integer: " << rest[1] << "\n";
         return 1;
     }
@@ -454,7 +525,7 @@ int cmd_top(const std::vector<std::string>& args) {
         query_terms(std::vector<std::string>(rest.begin() + 2, rest.end()));
 
     const std::vector<ScoredDocument> ranking =
-        use_bm25 ? score_bm25(terms, index) : score_tfidf(terms, index);
+        score(terms, index, use_bm25 ? Scorer::Bm25 : Scorer::TfIdf, threads);
 
     print_ranking(index, top_k(ranking, k));
     return 0;
@@ -768,6 +839,9 @@ int main(int argc, char** argv) {
     }
     if (command == "lengths") {
         return cmd_lengths(rest);
+    }
+    if (command == "pool-sum") {
+        return cmd_pool_sum(rest);
     }
     if (command == "index-write") {
         return cmd_index_write(rest);

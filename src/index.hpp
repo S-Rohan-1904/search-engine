@@ -74,6 +74,14 @@ public:
     // Every indexed term, sorted ascending.
     std::vector<std::string> terms() const;
 
+    // Appends another index's documents after this one's.
+    //
+    // The other index's ordinals are local to it, so every one of its postings
+    // is shifted by this index's current document count. Callers must append in
+    // the order the documents should ultimately have, which is what keeps the
+    // merged postings lists ascending without a sort.
+    void append(InvertedIndex other);
+
     // Rebuilds an index from parts that were decoded from a file.
     //
     // The caller owns the invariants the build loop would otherwise guarantee:
@@ -91,7 +99,21 @@ private:
     std::unordered_map<std::string, std::vector<Posting>> postings_;
 };
 
-// Builds an index over every document in corpus_dir, added in the sorted id
-// order that list_document_ids returns. Documents that fail to parse are
-// skipped.
+// Builds an index over the named documents, in the order given. Documents that
+// fail to parse are skipped, so a document's ordinal is its position among the
+// ones that parsed, not among the ids passed in.
+InvertedIndex build_index_from(const std::filesystem::path& corpus_dir,
+                               const std::vector<std::string>& ids);
+
+// Builds an index over every document in corpus_dir, in the sorted id order
+// that list_document_ids returns.
 InvertedIndex build_index(const std::filesystem::path& corpus_dir);
+
+// The same index, built on several threads.
+//
+// The corpus is split into contiguous slices, one per thread, and each slice is
+// indexed independently before the results are merged in slice order. The
+// result is identical to build_index for any thread count, including the
+// document ordinals and therefore the encoded bytes.
+InvertedIndex build_index_parallel(const std::filesystem::path& corpus_dir,
+                                   std::size_t threads);

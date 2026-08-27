@@ -1,6 +1,8 @@
 #include "index.hpp"
 
 #include <algorithm>
+#include <future>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <utility>
@@ -8,6 +10,7 @@
 #include "analyzer.hpp"
 #include "corpus.hpp"
 #include "document.hpp"
+#include "thread_pool.hpp"
 
 void InvertedIndex::add_document(std::string doc_id, const std::vector<Token>& terms) {
     const std::size_t ordinal = document_ids_.size();
@@ -93,13 +96,66 @@ InvertedIndex InvertedIndex::from_parts(
     return index;
 }
 
-InvertedIndex build_index(const std::filesystem::path& corpus_dir) {
+void InvertedIndex::append(InvertedIndex other) {
+    const std::size_t offset = document_ids_.size();
+
+    for (auto& [term, list] : other.postings_) {
+        std::vector<Posting>& destination = postings_[term];
+        destination.reserve(destination.size() + list.size());
+        for (Posting& posting : list) {
+            posting.doc_id += offset;
+            destination.push_back(std::move(posting));
+        }
+    }
+
+    document_ids_.insert(document_ids_.end(),
+                         std::make_move_iterator(other.document_ids_.begin()),
+                         std::make_move_iterator(other.document_ids_.end()));
+    document_lengths_.insert(document_lengths_.end(), other.document_lengths_.begin(),
+                             other.document_lengths_.end());
+}
+
+InvertedIndex build_index_from(const std::filesystem::path& corpus_dir,
+                               const std::vector<std::string>& ids) {
     InvertedIndex index;
-    for (const std::string& id : list_document_ids(corpus_dir)) {
+    for (const std::string& id : ids) {
         const std::optional<Document> doc = read_document(corpus_dir, id);
         if (doc.has_value()) {
             index.add_document(id, analyze_document(*doc));
         }
+    }
+    return index;
+}
+
+InvertedIndex build_index(const std::filesystem::path& corpus_dir) {
+    return build_index_from(corpus_dir, list_document_ids(corpus_dir));
+}
+
+InvertedIndex build_index_parallel(const std::filesystem::path& corpus_dir,
+                                   std::size_t threads) {
+    const std::vector<std::string> ids = list_document_ids(corpus_dir);
+    if (threads <= 1 || ids.size() < 2) {
+        return build_index_from(corpus_dir, ids);
+    }
+
+    const std::size_t slice_count = std::min(threads, ids.size());
+    const std::size_t slice_size = (ids.size() + slice_count - 1) / slice_count;
+
+    ThreadPool pool(slice_count);
+    std::vector<std::future<InvertedIndex>> pending;
+    pending.reserve(slice_count);
+
+    for (std::size_t start = 0; start < ids.size(); start += slice_size) {
+        const std::size_t end = std::min(start + slice_size, ids.size());
+        std::vector<std::string> slice(ids.begin() + static_cast<std::ptrdiff_t>(start),
+                                       ids.begin() + static_cast<std::ptrdiff_t>(end));
+        pending.push_back(pool.submit(
+            [corpus_dir, slice = std::move(slice)] { return build_index_from(corpus_dir, slice); }));
+    }
+
+    InvertedIndex index;
+    for (std::future<InvertedIndex>& future : pending) {
+        index.append(future.get());
     }
     return index;
 }
