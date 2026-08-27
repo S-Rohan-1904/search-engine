@@ -8,7 +8,9 @@
 #include "analyzer.hpp"
 #include "corpus.hpp"
 #include "document.hpp"
+#include "index.hpp"
 #include "normalize.hpp"
+#include "query.hpp"
 #include "stemmer.hpp"
 #include "stopwords.hpp"
 #include "tokenizer.hpp"
@@ -32,7 +34,14 @@ int usage() {
                  "  stem <word>                  reduce a word to its Porter stem\n"
                  "  analyze <text>               run the full analysis chain\n"
                  "  analyze-doc <corpus_dir> <doc_id>\n"
-                 "                               analyze one document from disk\n";
+                 "                               analyze one document from disk\n"
+                 "  index-stats <corpus_dir>     document, term and posting counts\n"
+                 "  index-terms <corpus_dir>     every indexed term with its document frequency\n"
+                 "  postings <corpus_dir> <word>  documents containing a word\n"
+                 "  tf <corpus_dir> <word>       per-document counts for a word\n"
+                 "  positions <corpus_dir> <word> token positions of a word per document\n"
+                 "  lex <query>                  split a query into syntactic tokens\n"
+                 "  parse <query>                parse a query into a boolean tree\n";
     return 2;
 }
 
@@ -144,6 +153,134 @@ void print_terms(const std::vector<Token>& tokens) {
     for (const Token& token : tokens) {
         std::cout << token.position << " " << token.offset << " " << token.text << "\n";
     }
+}
+
+int cmd_lex(const std::vector<std::string>& args) {
+    if (args.size() != 1) {
+        return usage();
+    }
+
+    std::vector<QueryToken> tokens;
+    std::string error;
+    if (!lex_query(args[0], tokens, error)) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
+    }
+
+    for (const QueryToken& token : tokens) {
+        switch (token.kind) {
+        case QueryTokenKind::Term:   std::cout << "term " << token.text << "\n"; break;
+        case QueryTokenKind::Phrase: std::cout << "phrase " << token.text << "\n"; break;
+        case QueryTokenKind::And:    std::cout << "and\n"; break;
+        case QueryTokenKind::Or:     std::cout << "or\n"; break;
+        case QueryTokenKind::Not:    std::cout << "not\n"; break;
+        case QueryTokenKind::LParen: std::cout << "lparen\n"; break;
+        case QueryTokenKind::RParen: std::cout << "rparen\n"; break;
+        }
+    }
+    return 0;
+}
+
+int cmd_parse(const std::vector<std::string>& args) {
+    if (args.size() != 1) {
+        return usage();
+    }
+
+    const ParseResult result = parse_query(args[0]);
+    if (!result.root) {
+        std::cerr << "search: " << result.error << "\n";
+        return 1;
+    }
+
+    std::cout << to_sexpr(*result.root) << "\n";
+    return 0;
+}
+
+template <typename Emit>
+int run_term_query(const std::vector<std::string>& args, Emit emit) {
+    if (args.size() != 2) {
+        return usage();
+    }
+
+    const std::filesystem::path corpus_dir = args[0];
+    std::error_code ec;
+    if (!std::filesystem::is_directory(corpus_dir, ec)) {
+        return reject_missing_corpus(corpus_dir);
+    }
+
+    const std::vector<Token> query = analyze(args[1]);
+    if (query.size() > 1) {
+        std::cerr << "search: not a single term: " << args[1] << "\n";
+        return 1;
+    }
+    if (query.empty()) {
+        return 0;
+    }
+
+    const InvertedIndex index = build_index(corpus_dir);
+    const std::vector<std::string>& ids = index.document_ids();
+    for (const Posting& posting : index.postings(query.front().text)) {
+        emit(ids[posting.doc_id], posting);
+    }
+    return 0;
+}
+
+int cmd_postings(const std::vector<std::string>& args) {
+    return run_term_query(args, [](const std::string& id, const Posting&) {
+        std::cout << id << "\n";
+    });
+}
+
+int cmd_tf(const std::vector<std::string>& args) {
+    return run_term_query(args, [](const std::string& id, const Posting& posting) {
+        std::cout << id << " " << posting.frequency << "\n";
+    });
+}
+
+int cmd_positions(const std::vector<std::string>& args) {
+    return run_term_query(args, [](const std::string& id, const Posting& posting) {
+        std::cout << id;
+        for (const std::size_t position : posting.positions) {
+            std::cout << " " << position;
+        }
+        std::cout << "\n";
+    });
+}
+
+int cmd_index_stats(const std::vector<std::string>& args) {
+    if (args.size() != 1) {
+        return usage();
+    }
+
+    const std::filesystem::path corpus_dir = args[0];
+    std::error_code ec;
+    if (!std::filesystem::is_directory(corpus_dir, ec)) {
+        return reject_missing_corpus(corpus_dir);
+    }
+
+    const InvertedIndex index = build_index(corpus_dir);
+    std::cout << "documents: " << index.document_count() << "\n"
+              << "terms: " << index.term_count() << "\n"
+              << "postings: " << index.posting_count() << "\n";
+    return 0;
+}
+
+int cmd_index_terms(const std::vector<std::string>& args) {
+    if (args.size() != 1) {
+        return usage();
+    }
+
+    const std::filesystem::path corpus_dir = args[0];
+    std::error_code ec;
+    if (!std::filesystem::is_directory(corpus_dir, ec)) {
+        return reject_missing_corpus(corpus_dir);
+    }
+
+    const InvertedIndex index = build_index(corpus_dir);
+    for (const std::string& term : index.terms()) {
+        std::cout << term << " " << index.document_frequency(term) << "\n";
+    }
+    return 0;
 }
 
 int cmd_analyze(const std::vector<std::string>& args) {
@@ -290,6 +427,27 @@ int main(int argc, char** argv) {
     }
     if (command == "analyze") {
         return cmd_analyze(rest);
+    }
+    if (command == "index-stats") {
+        return cmd_index_stats(rest);
+    }
+    if (command == "index-terms") {
+        return cmd_index_terms(rest);
+    }
+    if (command == "postings") {
+        return cmd_postings(rest);
+    }
+    if (command == "tf") {
+        return cmd_tf(rest);
+    }
+    if (command == "positions") {
+        return cmd_positions(rest);
+    }
+    if (command == "lex") {
+        return cmd_lex(rest);
+    }
+    if (command == "parse") {
+        return cmd_parse(rest);
     }
     if (command == "analyze-doc") {
         return cmd_analyze_doc(rest);

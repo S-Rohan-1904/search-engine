@@ -33,6 +33,8 @@ add_executable(search
   src/stopwords.cpp
   src/stemmer.cpp
   src/analyzer.cpp
+  src/index.cpp
+  src/query.cpp
 )
 
 target_include_directories(search PRIVATE src)
