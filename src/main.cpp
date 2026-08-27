@@ -12,6 +12,7 @@
 #include "document.hpp"
 #include "evaluator.hpp"
 #include "index.hpp"
+#include "index_io.hpp"
 #include "normalize.hpp"
 #include "query.hpp"
 #include "ranking.hpp"
@@ -56,7 +57,12 @@ int usage() {
                  "  tfidf <corpus_dir> <word>... rank documents by TF-IDF\n"
                  "  bm25 <corpus_dir> <word>...  rank documents by BM25\n"
                  "  top [--bm25] <corpus_dir> <k> <word>...\n"
-                 "                               the k highest scoring documents\n";
+                 "                               the k highest scoring documents\n"
+                 "  index-write [--encoding <name>] <source> <file>\n"
+                 "                               save an index to disk\n"
+                 "  index-size <source>          encoded size under each encoding\n"
+                 "\n"
+                 "<source> is a corpus directory or a saved index file.\n";
     return 2;
 }
 
@@ -64,6 +70,25 @@ int usage() {
 int reject_missing_corpus(const std::filesystem::path& corpus_dir) {
     std::cerr << "search: not a directory: " << corpus_dir.string() << "\n";
     return 1;
+}
+
+std::optional<InvertedIndex> open_index(const std::filesystem::path& source) {
+    std::error_code ec;
+    if (std::filesystem::is_directory(source, ec)) {
+        return build_index(source);
+    }
+
+    if (std::filesystem::is_regular_file(source, ec)) {
+        std::string error;
+        std::optional<InvertedIndex> index = read_index_file(source, error);
+        if (!index.has_value()) {
+            std::cerr << "search: " << error << "\n";
+        }
+        return index;
+    }
+
+    reject_missing_corpus(source);
+    return std::nullopt;
 }
 
 int cmd_docs(const std::vector<std::string>& args) {
@@ -200,13 +225,11 @@ int run_set_query(const std::vector<std::string>& args, std::size_t min_words, C
         return usage();
     }
 
-    const std::filesystem::path corpus_dir = args[0];
-    std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
-        return reject_missing_corpus(corpus_dir);
+    const std::optional<InvertedIndex> opened = open_index(args[0]);
+    if (!opened.has_value()) {
+        return 1;
     }
-
-    const InvertedIndex index = build_index(corpus_dir);
+    const InvertedIndex& index = *opened;
 
     std::vector<std::size_t> result;
     if (!literal_doc_ids(index, args[1], result)) {
@@ -241,11 +264,11 @@ int cmd_andnot(const std::vector<std::string>& args) {
 }
 
 int run_parsed_query(const std::vector<std::string>& args, const std::string& query) {
-    const std::filesystem::path corpus_dir = args[0];
-    std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
-        return reject_missing_corpus(corpus_dir);
+    const std::optional<InvertedIndex> opened = open_index(args[0]);
+    if (!opened.has_value()) {
+        return 1;
     }
+    const InvertedIndex& index = *opened;
 
     const ParseResult parsed = parse_query(query);
     if (!parsed.root) {
@@ -253,7 +276,6 @@ int run_parsed_query(const std::vector<std::string>& args, const std::string& qu
         return 1;
     }
 
-    const InvertedIndex index = build_index(corpus_dir);
     print_document_ids(index, evaluate(*parsed.root, index));
     return 0;
 }
@@ -276,18 +298,83 @@ int cmd_phrase(const std::vector<std::string>& args) {
     return run_parsed_query(args, "\"" + args[1] + "\"");
 }
 
+int cmd_index_write(const std::vector<std::string>& args) {
+    std::vector<std::string> rest = args;
+    IndexEncoding encoding = IndexEncoding::VarByte;
+    if (rest.size() >= 2 && rest.front() == "--encoding") {
+        const std::optional<IndexEncoding> parsed = parse_encoding(rest[1]);
+        if (!parsed.has_value()) {
+            std::cerr << "search: unknown encoding: " << rest[1] << "\n";
+            return 1;
+        }
+        encoding = *parsed;
+        rest.erase(rest.begin(), rest.begin() + 2);
+    }
+    if (rest.size() != 2) {
+        return usage();
+    }
+
+    const std::optional<InvertedIndex> opened = open_index(rest[0]);
+    if (!opened.has_value()) {
+        return 1;
+    }
+
+    std::string error;
+    if (!write_index_file(*opened, rest[1], encoding, error)) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+int cmd_index_size(const std::vector<std::string>& args) {
+    if (args.size() != 1) {
+        return usage();
+    }
+
+    const std::optional<InvertedIndex> opened = open_index(args[0]);
+    if (!opened.has_value()) {
+        return 1;
+    }
+
+    const IndexEncoding encodings[] = {IndexEncoding::Plain, IndexEncoding::Delta,
+                                       IndexEncoding::VarByte};
+    const char* names[] = {"plain", "delta", "varbyte"};
+
+    std::size_t plain_total = 0;
+    for (std::size_t i = 0; i < 3; i++) {
+        const IndexSizeReport report = measure_index(*opened, encodings[i]);
+        if (i == 0) {
+            plain_total = report.total;
+        }
+
+        std::cout << names[i] << " " << report.total
+                  << " header " << report.header
+                  << " documents " << report.documents
+                  << " dictionary " << report.dictionary
+                  << " postings " << report.postings
+                  << " positions " << report.positions << "\n";
+    }
+
+    const IndexSizeReport best = measure_index(*opened, IndexEncoding::VarByte);
+    std::cout << "ratio " << std::fixed << std::setprecision(2)
+              << (best.total > 0 ? static_cast<double>(plain_total) / static_cast<double>(best.total)
+                                 : 0.0)
+              << "\n";
+    return 0;
+}
+
 int cmd_lengths(const std::vector<std::string>& args) {
     if (args.size() != 1) {
         return usage();
     }
 
-    const std::filesystem::path corpus_dir = args[0];
-    std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
-        return reject_missing_corpus(corpus_dir);
+    const std::optional<InvertedIndex> opened = open_index(args[0]);
+    if (!opened.has_value()) {
+        return 1;
     }
+    const InvertedIndex& index = *opened;
 
-    const InvertedIndex index = build_index(corpus_dir);
     const std::vector<std::string>& ids = index.document_ids();
     for (std::size_t doc_id = 0; doc_id < ids.size(); doc_id++) {
         std::cout << ids[doc_id] << " " << index.document_length(doc_id) << "\n";
@@ -312,13 +399,12 @@ int run_ranking(const std::vector<std::string>& args, Scorer scorer) {
         return usage();
     }
 
-    const std::filesystem::path corpus_dir = args[0];
-    std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
-        return reject_missing_corpus(corpus_dir);
+    const std::optional<InvertedIndex> opened = open_index(args[0]);
+    if (!opened.has_value()) {
+        return 1;
     }
+    const InvertedIndex& index = *opened;
 
-    const InvertedIndex index = build_index(corpus_dir);
     const std::vector<std::string> terms =
         query_terms(std::vector<std::string>(args.begin() + 1, args.end()));
 
@@ -345,11 +431,11 @@ int cmd_top(const std::vector<std::string>& args) {
         return usage();
     }
 
-    const std::filesystem::path corpus_dir = rest[0];
-    std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
-        return reject_missing_corpus(corpus_dir);
+    const std::optional<InvertedIndex> opened = open_index(rest[0]);
+    if (!opened.has_value()) {
+        return 1;
     }
+    const InvertedIndex& index = *opened;
 
     std::size_t k = 0;
     try {
@@ -364,7 +450,6 @@ int cmd_top(const std::vector<std::string>& args) {
         return 1;
     }
 
-    const InvertedIndex index = build_index(corpus_dir);
     const std::vector<std::string> terms =
         query_terms(std::vector<std::string>(rest.begin() + 2, rest.end()));
 
@@ -422,11 +507,11 @@ int run_term_query(const std::vector<std::string>& args, Emit emit) {
         return usage();
     }
 
-    const std::filesystem::path corpus_dir = args[0];
-    std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
-        return reject_missing_corpus(corpus_dir);
+    const std::optional<InvertedIndex> opened = open_index(args[0]);
+    if (!opened.has_value()) {
+        return 1;
     }
+    const InvertedIndex& index = *opened;
 
     const std::vector<Token> query = analyze(args[1]);
     if (query.size() > 1) {
@@ -437,7 +522,6 @@ int run_term_query(const std::vector<std::string>& args, Emit emit) {
         return 0;
     }
 
-    const InvertedIndex index = build_index(corpus_dir);
     const std::vector<std::string>& ids = index.document_ids();
     for (const Posting& posting : index.postings(query.front().text)) {
         emit(ids[posting.doc_id], posting);
@@ -472,13 +556,12 @@ int cmd_index_stats(const std::vector<std::string>& args) {
         return usage();
     }
 
-    const std::filesystem::path corpus_dir = args[0];
-    std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
-        return reject_missing_corpus(corpus_dir);
+    const std::optional<InvertedIndex> opened = open_index(args[0]);
+    if (!opened.has_value()) {
+        return 1;
     }
+    const InvertedIndex& index = *opened;
 
-    const InvertedIndex index = build_index(corpus_dir);
     std::cout << "documents: " << index.document_count() << "\n"
               << "terms: " << index.term_count() << "\n"
               << "postings: " << index.posting_count() << "\n";
@@ -490,13 +573,12 @@ int cmd_index_terms(const std::vector<std::string>& args) {
         return usage();
     }
 
-    const std::filesystem::path corpus_dir = args[0];
-    std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
-        return reject_missing_corpus(corpus_dir);
+    const std::optional<InvertedIndex> opened = open_index(args[0]);
+    if (!opened.has_value()) {
+        return 1;
     }
+    const InvertedIndex& index = *opened;
 
-    const InvertedIndex index = build_index(corpus_dir);
     for (const std::string& term : index.terms()) {
         std::cout << term << " " << index.document_frequency(term) << "\n";
     }
@@ -686,6 +768,12 @@ int main(int argc, char** argv) {
     }
     if (command == "lengths") {
         return cmd_lengths(rest);
+    }
+    if (command == "index-write") {
+        return cmd_index_write(rest);
+    }
+    if (command == "index-size") {
+        return cmd_index_size(rest);
     }
     if (command == "tfidf") {
         return cmd_tfidf(rest);

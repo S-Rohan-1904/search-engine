@@ -82,6 +82,17 @@ std::vector<std::string> InvertedIndex::terms() const {
     return out;
 }
 
+InvertedIndex InvertedIndex::from_parts(
+    std::vector<std::string> document_ids,
+    std::vector<std::size_t> document_lengths,
+    std::unordered_map<std::string, std::vector<Posting>> postings) {
+    InvertedIndex index;
+    index.document_ids_ = std::move(document_ids);
+    index.document_lengths_ = std::move(document_lengths);
+    index.postings_ = std::move(postings);
+    return index;
+}
+
 InvertedIndex build_index(const std::filesystem::path& corpus_dir) {
     InvertedIndex index;
     for (const std::string& id : list_document_ids(corpus_dir)) {

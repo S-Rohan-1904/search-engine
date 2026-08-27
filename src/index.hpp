@@ -74,6 +74,17 @@ public:
     // Every indexed term, sorted ascending.
     std::vector<std::string> terms() const;
 
+    // Rebuilds an index from parts that were decoded from a file.
+    //
+    // The caller owns the invariants the build loop would otherwise guarantee:
+    // every postings list ascending by doc_id and free of repeats, every
+    // doc_id within range, and one length per document. The loader checks all
+    // of that before calling this.
+    static InvertedIndex from_parts(
+        std::vector<std::string> document_ids,
+        std::vector<std::size_t> document_lengths,
+        std::unordered_map<std::string, std::vector<Posting>> postings);
+
 private:
     std::vector<std::string> document_ids_;
     std::vector<std::size_t> document_lengths_;
