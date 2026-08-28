@@ -11,17 +11,22 @@
 #include <vector>
 
 #include "analyzer.hpp"
+#include "complete.hpp"
 #include "corpus.hpp"
 #include "crawler.hpp"
 #include "document.hpp"
+#include "edit_distance.hpp"
 #include "fetcher.hpp"
 #include "html.hpp"
 #include "evaluator.hpp"
 #include "index.hpp"
 #include "index_io.hpp"
 #include "normalize.hpp"
+#include "pagerank.hpp"
 #include "query.hpp"
 #include "robots.hpp"
+#include "snippet.hpp"
+#include "suggest.hpp"
 #include "ranking.hpp"
 #include "thread_pool.hpp"
 #include "url.hpp"
@@ -72,8 +77,19 @@ int usage() {
                  "                               the k highest scoring documents\n"
                  "  index-write [--encoding <name>] [--threads <n>] <source> <file>\n"
                  "                               save an index to disk\n"
+                 "  index-update [--encoding <name>] <corpus_dir> <file>\n"
+                 "                               re-index only what changed\n"
                  "  index-size <source>          encoded size under each encoding\n"
                  "  pool-sum <threads> <n>       sum of squares below n, on a thread pool\n"
+                 "  snippet [--max-chars <n>] <corpus_dir> <doc_id> <word>...\n"
+                 "                               an excerpt with the matches marked\n"
+                 "  edit-distance <a> <b>        Levenshtein distance between two words\n"
+                 "  suggest [--max-distance <n>] [--limit <n>] <source> <word>\n"
+                 "                               dictionary terms near a misspelling\n"
+                 "  complete [--limit <n>] <source> <prefix>\n"
+                 "                               dictionary terms beginning with a prefix\n"
+                 "  pagerank [--iterations <n>] [--damping <d>] <links_file>\n"
+                 "                               PageRank over a crawl's link graph\n"
                  "  url <url>                    normalize a url\n"
                  "  url-resolve <base> <ref>     resolve a link against a base url\n"
                  "  robots <file> <agent> <path> is this path allowed?\n"
@@ -361,6 +377,239 @@ bool read_text_file(const std::filesystem::path& path, std::string& out) {
     }
     out.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     return true;
+}
+
+int cmd_index_update(const std::vector<std::string>& args) {
+    std::vector<std::string> rest = args;
+    IndexEncoding encoding = IndexEncoding::VarByte;
+    if (rest.size() >= 2 && rest.front() == "--encoding") {
+        const std::optional<IndexEncoding> parsed = parse_encoding(rest[1]);
+        if (!parsed.has_value()) {
+            std::cerr << "search: unknown encoding: " << rest[1] << "\n";
+            return 1;
+        }
+        encoding = *parsed;
+        rest.erase(rest.begin(), rest.begin() + 2);
+    }
+    if (rest.size() != 2) {
+        return usage();
+    }
+
+    const std::filesystem::path corpus_dir = rest[0];
+    std::error_code ec;
+    if (!std::filesystem::is_directory(corpus_dir, ec)) {
+        return reject_missing_corpus(corpus_dir);
+    }
+
+    InvertedIndex previous;
+    if (std::filesystem::is_regular_file(rest[1], ec)) {
+        std::string error;
+        std::optional<InvertedIndex> loaded = read_index_file(rest[1], error);
+        if (!loaded.has_value()) {
+            std::cerr << "search: " << error << "\n";
+            return 1;
+        }
+        previous = std::move(*loaded);
+    }
+
+    IndexUpdateReport report;
+    const InvertedIndex updated = update_index(previous, corpus_dir, report);
+
+    std::string error;
+    if (!write_index_file(updated, rest[1], encoding, error)) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
+    }
+
+    std::cout << "added " << report.added << "\n"
+              << "updated " << report.updated << "\n"
+              << "removed " << report.removed << "\n"
+              << "unchanged " << report.unchanged << "\n";
+    return 0;
+}
+
+int cmd_pagerank(const std::vector<std::string>& args) {
+    std::vector<std::string> rest = args;
+    std::size_t iterations = 30;
+    double damping = 0.85;
+
+    while (rest.size() >= 2 && rest.front().starts_with("--")) {
+        const std::string flag = rest.front();
+        if (flag == "--iterations") {
+            if (!parse_count(rest[1], iterations)) {
+                std::cerr << "search: iterations must be a non-negative integer: " << rest[1]
+                          << "\n";
+                return 1;
+            }
+        } else if (flag == "--damping") {
+            try {
+                std::size_t consumed = 0;
+                damping = std::stod(rest[1], &consumed);
+                if (consumed != rest[1].size() || damping < 0.0 || damping > 1.0) {
+                    throw std::invalid_argument("damping");
+                }
+            } catch (const std::exception&) {
+                std::cerr << "search: damping must be between 0 and 1: " << rest[1] << "\n";
+                return 1;
+            }
+        } else {
+            std::cerr << "search: unknown option: " << flag << "\n";
+            return 1;
+        }
+        rest.erase(rest.begin(), rest.begin() + 2);
+    }
+
+    if (rest.size() != 1) {
+        return usage();
+    }
+
+    std::string text;
+    if (!read_text_file(rest[0], text)) {
+        return 1;
+    }
+
+    std::vector<std::pair<std::string, std::string>> links;
+    std::size_t line_start = 0;
+    while (line_start < text.size()) {
+        const std::size_t line_end = text.find('\n', line_start);
+        const std::string line =
+            text.substr(line_start, line_end == std::string::npos ? std::string::npos
+                                                                  : line_end - line_start);
+        const std::size_t tab = line.find('\t');
+        if (tab != std::string::npos) {
+            links.emplace_back(line.substr(0, tab), line.substr(tab + 1));
+        }
+        if (line_end == std::string::npos) {
+            break;
+        }
+        line_start = line_end + 1;
+    }
+
+    std::cout << std::fixed << std::setprecision(6);
+    for (const RankedPage& page : pagerank(links, iterations, damping)) {
+        std::cout << page.page << " " << page.score << "\n";
+    }
+    return 0;
+}
+
+int cmd_edit_distance(const std::vector<std::string>& args) {
+    if (args.size() != 2) {
+        return usage();
+    }
+
+    std::cout << edit_distance(args[0], args[1]) << "\n";
+    return 0;
+}
+
+int cmd_snippet(const std::vector<std::string>& args) {
+    std::vector<std::string> rest = args;
+    SnippetOptions options;
+
+    if (rest.size() >= 2 && rest.front() == "--max-chars") {
+        std::size_t max_chars = 0;
+        if (!parse_count(rest[1], max_chars) || max_chars == 0) {
+            std::cerr << "search: max-chars must be a positive integer: " << rest[1] << "\n";
+            return 1;
+        }
+        options.max_chars = max_chars;
+        rest.erase(rest.begin(), rest.begin() + 2);
+    }
+
+    if (rest.size() < 3) {
+        return usage();
+    }
+
+    const std::filesystem::path corpus_dir = rest[0];
+    std::error_code ec;
+    if (!std::filesystem::is_directory(corpus_dir, ec)) {
+        return reject_missing_corpus(corpus_dir);
+    }
+
+    const std::optional<Document> doc = read_document(corpus_dir, rest[1]);
+    if (!doc.has_value()) {
+        std::cerr << "search: no such document: " << rest[1] << "\n";
+        return 1;
+    }
+
+    const std::vector<std::string> terms =
+        query_terms(std::vector<std::string>(rest.begin() + 2, rest.end()));
+
+    std::cout << make_snippet(doc->title + "\n\n" + doc->body, terms, options) << "\n";
+    return 0;
+}
+
+int cmd_suggest(const std::vector<std::string>& args) {
+    std::vector<std::string> rest = args;
+    std::size_t max_distance = 2;
+    std::size_t limit = 5;
+
+    while (rest.size() >= 2 && rest.front().starts_with("--")) {
+        const std::string flag = rest.front();
+        std::size_t value = 0;
+        if (!parse_count(rest[1], value)) {
+            std::cerr << "search: expected a number after " << flag << ": " << rest[1] << "\n";
+            return 1;
+        }
+        if (flag == "--max-distance") {
+            max_distance = value;
+        } else if (flag == "--limit") {
+            limit = value;
+        } else {
+            std::cerr << "search: unknown option: " << flag << "\n";
+            return 1;
+        }
+        rest.erase(rest.begin(), rest.begin() + 2);
+    }
+
+    if (rest.size() != 2) {
+        return usage();
+    }
+
+    const std::optional<InvertedIndex> opened = open_index(rest[0]);
+    if (!opened.has_value()) {
+        return 1;
+    }
+
+    const std::vector<Token> analyzed = analyze(rest[1]);
+    if (analyzed.size() != 1) {
+        std::cerr << "search: not a single term: " << rest[1] << "\n";
+        return 1;
+    }
+
+    const BkTree tree = build_bk_tree(*opened);
+    for (const Suggestion& suggestion : tree.search(analyzed.front().text, max_distance, limit)) {
+        std::cout << suggestion.term << " " << suggestion.distance << " "
+                  << suggestion.document_frequency << "\n";
+    }
+    return 0;
+}
+
+int cmd_complete(const std::vector<std::string>& args) {
+    std::vector<std::string> rest = args;
+    std::size_t limit = 10;
+
+    if (rest.size() >= 2 && rest.front() == "--limit") {
+        if (!parse_count(rest[1], limit)) {
+            std::cerr << "search: limit must be a non-negative integer: " << rest[1] << "\n";
+            return 1;
+        }
+        rest.erase(rest.begin(), rest.begin() + 2);
+    }
+
+    if (rest.size() != 2) {
+        return usage();
+    }
+
+    const std::optional<InvertedIndex> opened = open_index(rest[0]);
+    if (!opened.has_value()) {
+        return 1;
+    }
+
+    const Trie trie = build_trie(*opened);
+    for (const Completion& completion : trie.complete(normalize(rest[1]), limit)) {
+        std::cout << completion.term << " " << completion.document_frequency << "\n";
+    }
+    return 0;
 }
 
 int cmd_url(const std::vector<std::string>& args) {
@@ -1071,6 +1320,24 @@ int main(int argc, char** argv) {
     }
     if (command == "lengths") {
         return cmd_lengths(rest);
+    }
+    if (command == "index-update") {
+        return cmd_index_update(rest);
+    }
+    if (command == "pagerank") {
+        return cmd_pagerank(rest);
+    }
+    if (command == "edit-distance") {
+        return cmd_edit_distance(rest);
+    }
+    if (command == "snippet") {
+        return cmd_snippet(rest);
+    }
+    if (command == "suggest") {
+        return cmd_suggest(rest);
+    }
+    if (command == "complete") {
+        return cmd_complete(rest);
     }
     if (command == "url") {
         return cmd_url(rest);

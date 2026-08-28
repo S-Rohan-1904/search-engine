@@ -48,6 +48,11 @@ add_executable(search
   src/frontier.cpp
   src/fetcher.cpp
   src/crawler.cpp
+  src/snippet.cpp
+  src/edit_distance.cpp
+  src/suggest.cpp
+  src/complete.cpp
+  src/pagerank.cpp
 )
 
 target_include_directories(search PRIVATE src)

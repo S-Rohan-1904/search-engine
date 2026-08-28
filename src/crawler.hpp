@@ -63,5 +63,7 @@ std::chrono::milliseconds delay_for(const RobotsRules& rules, std::chrono::milli
 //
 // When `output_dir` is set, each page is also written there in the corpus
 // format, named doc_0001.txt and upward in visit order, so a crawl can be
-// indexed directly.
+// indexed directly, alongside a links.tsv recording which document links to
+// which. Only links between pages the crawl actually kept are recorded, since a
+// link to something never fetched has no node to point at.
 std::vector<CrawledPage> crawl(const Url& seed, Fetcher& fetcher, const CrawlOptions& options);

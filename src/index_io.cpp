@@ -9,7 +9,7 @@
 namespace {
 
 constexpr unsigned char kMagic[4] = {'S', 'I', 'D', 'X'};
-constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kVersion = 2;
 
 class Writer {
 public:
@@ -151,6 +151,7 @@ std::vector<unsigned char> encode_into(const InvertedIndex& index, IndexEncoding
     for (std::size_t doc_id = 0; doc_id < ids.size(); doc_id++) {
         writer.text(ids[doc_id]);
         writer.number(index.document_length(doc_id));
+        writer.number(index.document_fingerprint(doc_id));
     }
     sizes.documents = writer.size() - mark;
     mark = writer.size();
@@ -244,16 +245,20 @@ std::optional<InvertedIndex> decode_index(const std::vector<unsigned char>& byte
 
     std::vector<std::string> ids;
     std::vector<std::size_t> lengths;
+    std::vector<std::uint64_t> fingerprints;
     ids.reserve(document_count);
     lengths.reserve(document_count);
+    fingerprints.reserve(document_count);
     for (std::uint64_t i = 0; i < document_count; i++) {
         std::string id;
         std::uint64_t length = 0;
-        if (!reader.text(id) || !reader.number(length)) {
+        std::uint64_t fingerprint = 0;
+        if (!reader.text(id) || !reader.number(length) || !reader.number(fingerprint)) {
             return truncated();
         }
         ids.push_back(std::move(id));
         lengths.push_back(static_cast<std::size_t>(length));
+        fingerprints.push_back(fingerprint);
     }
 
     std::uint64_t term_count = 0;
@@ -329,7 +334,7 @@ std::optional<InvertedIndex> decode_index(const std::vector<unsigned char>& byte
     }
 
     return InvertedIndex::from_parts(std::move(ids), std::move(lengths),
-                                     std::move(postings_by_term));
+                                     std::move(fingerprints), std::move(postings_by_term));
 }
 
 bool write_index_file(const InvertedIndex& index, const std::filesystem::path& path,

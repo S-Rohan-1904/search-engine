@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -34,7 +36,8 @@ public:
     // frequency and appending to its positions. A term's postings list length
     // is therefore its document frequency, and each posting carries that
     // document's count and the token positions behind it.
-    void add_document(std::string doc_id, const std::vector<Token>& terms);
+    void add_document(std::string doc_id, const std::vector<Token>& terms,
+                      std::uint64_t fingerprint = 0);
 
     std::size_t document_count() const;
 
@@ -68,6 +71,25 @@ public:
     // to its peers.
     double average_document_length() const;
 
+    // A hash of the bytes the document was built from, or 0 when unknown.
+    //
+    // Incremental indexing compares this against the file on disk to decide
+    // whether a document needs re-analyzing. It is the only thing the index
+    // remembers about a document's source, since the text itself is not stored.
+    std::uint64_t document_fingerprint(std::size_t doc_id) const;
+
+    // The ordinal of a document by its string id, if it is in the index.
+    std::optional<std::size_t> find_document(std::string_view doc_id) const;
+
+    // Rebuilds the token stream a document was indexed from.
+    //
+    // Every posting records the positions a term occurred at, so pairing each
+    // position with its term and sorting recovers the stream, minus the byte
+    // offsets the index never stored. That is what makes an incremental update
+    // possible without re-reading the file: a document that has not changed can
+    // be carried into a new index from the old one's postings alone.
+    std::vector<Token> document_terms(std::size_t doc_id) const;
+
     // String ids, in the order the documents were added.
     const std::vector<std::string>& document_ids() const;
 
@@ -91,11 +113,13 @@ public:
     static InvertedIndex from_parts(
         std::vector<std::string> document_ids,
         std::vector<std::size_t> document_lengths,
+        std::vector<std::uint64_t> document_fingerprints,
         std::unordered_map<std::string, std::vector<Posting>> postings);
 
 private:
     std::vector<std::string> document_ids_;
     std::vector<std::size_t> document_lengths_;
+    std::vector<std::uint64_t> document_fingerprints_;
     std::unordered_map<std::string, std::vector<Posting>> postings_;
 };
 
@@ -108,6 +132,33 @@ InvertedIndex build_index_from(const std::filesystem::path& corpus_dir,
 // Builds an index over every document in corpus_dir, in the sorted id order
 // that list_document_ids returns.
 InvertedIndex build_index(const std::filesystem::path& corpus_dir);
+
+// What an incremental update changed.
+struct IndexUpdateReport {
+    std::size_t added = 0;
+    std::size_t updated = 0;
+    std::size_t removed = 0;
+    std::size_t unchanged = 0;
+};
+
+// Rebuilds an index against a corpus, re-analyzing only what changed.
+//
+// A document whose file still hashes to what the index recorded is carried
+// across from the previous index rather than read and analyzed again. One that
+// is new or changed is analyzed; one that has disappeared from the corpus is
+// dropped.
+//
+// The result is a complete index in sorted id order, identical to what
+// build_index would produce, rather than an index with tombstones in it.
+// Deleting by tombstone and compacting later is what a system with continuous
+// writes has to do; a corpus that is re-scanned in one pass can just be rebuilt,
+// and the saving that matters is skipping the analysis, not the bookkeeping.
+InvertedIndex update_index(const InvertedIndex& previous,
+                           const std::filesystem::path& corpus_dir, IndexUpdateReport& report);
+
+// The fingerprint of a document file, or 0 if it cannot be read.
+std::uint64_t fingerprint_document(const std::filesystem::path& corpus_dir,
+                                   const std::string& id);
 
 // The same index, built on several threads.
 //

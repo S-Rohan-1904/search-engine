@@ -7,12 +7,12 @@ CASES = [
     {
         "name": "the working corpus, broken down by section",
         "argv": ["index-size", "corpus/fixtures"],
-        "stdout": "plain 17570 header 9 documents 698 dictionary 4895 postings 8232 positions 3736\ndelta 17570 header 9 documents 698 dictionary 4895 postings 8232 positions 3736\nvarbyte 3375 header 9 documents 271 dictionary 1599 postings 1029 positions 467\nratio 5.21",
+        "stdout": "plain 17810 header 9 documents 938 dictionary 4895 postings 8232 positions 3736\ndelta 17810 header 9 documents 938 dictionary 4895 postings 8232 positions 3736\nvarbyte 3658 header 9 documents 554 dictionary 1599 postings 1029 positions 467\nratio 4.87",
     },
     {
         "name": "the tiny fixture",
         "argv": ["index-size", "tests/fixtures/tiny"],
-        "stdout": "plain 950 header 9 documents 70 dictionary 239 postings 456 positions 176\ndelta 950 header 9 documents 70 dictionary 239 postings 456 positions 176\nvarbyte 187 header 9 documents 21 dictionary 78 postings 57 positions 22\nratio 5.08",
+        "stdout": "plain 974 header 9 documents 94 dictionary 239 postings 456 positions 176\ndelta 974 header 9 documents 94 dictionary 239 postings 456 positions 176\nvarbyte 215 header 9 documents 49 dictionary 78 postings 57 positions 22\nratio 4.53",
     },
     {
         "name": "an empty corpus is almost all header",
@@ -22,12 +22,12 @@ CASES = [
     {
         "name": "a saved index measures the same as the corpus it came from",
         "argv": ["index-size", "tests/fixtures/index/good.bin"],
-        "stdout": "plain 950 header 9 documents 70 dictionary 239 postings 456 positions 176\ndelta 950 header 9 documents 70 dictionary 239 postings 456 positions 176\nvarbyte 187 header 9 documents 21 dictionary 78 postings 57 positions 22\nratio 5.08",
+        "stdout": "plain 974 header 9 documents 94 dictionary 239 postings 456 positions 176\ndelta 974 header 9 documents 94 dictionary 239 postings 456 positions 176\nvarbyte 215 header 9 documents 49 dictionary 78 postings 57 positions 22\nratio 4.53",
     },
     {
         "name": "and so does the corpus itself",
         "argv": ["index-size", "tests/fixtures/tiny"],
-        "stdout": "plain 950 header 9 documents 70 dictionary 239 postings 456 positions 176\ndelta 950 header 9 documents 70 dictionary 239 postings 456 positions 176\nvarbyte 187 header 9 documents 21 dictionary 78 postings 57 positions 22\nratio 5.08",
+        "stdout": "plain 974 header 9 documents 94 dictionary 239 postings 456 positions 176\ndelta 974 header 9 documents 94 dictionary 239 postings 456 positions 176\nvarbyte 215 header 9 documents 49 dictionary 78 postings 57 positions 22\nratio 4.53",
     },
     {
         "name": "a missing source is reported",

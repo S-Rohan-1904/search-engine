@@ -76,12 +76,31 @@ const RobotsRules& rules_for_host(std::unordered_map<std::string, RobotsRules>& 
     return cache.emplace(url.host, RobotsRules::parse(text, user_agent)).first->second;
 }
 
+std::string document_name(std::size_t ordinal) {
+    std::ostringstream name;
+    name << "doc_" << std::setw(4) << std::setfill('0') << ordinal;
+    return name.str();
+}
+
+void write_links(const std::filesystem::path& directory,
+                 const std::unordered_map<std::string, std::size_t>& document_of,
+                 const std::vector<std::pair<std::size_t, std::string>>& links) {
+    std::ofstream out(directory / "links.tsv");
+    if (!out) {
+        return;
+    }
+
+    for (const auto& [from, target] : links) {
+        const auto to = document_of.find(target);
+        if (to != document_of.end()) {
+            out << document_name(from) << "\t" << document_name(to->second) << "\n";
+        }
+    }
+}
+
 void write_page(const std::filesystem::path& directory, std::size_t ordinal,
                 const CrawledPage& page) {
-    std::ostringstream name;
-    name << "doc_" << std::setw(4) << std::setfill('0') << ordinal << ".txt";
-
-    std::ofstream out(directory / name.str());
+    std::ofstream out(directory / (document_name(ordinal) + ".txt"));
     if (!out) {
         return;
     }
@@ -103,6 +122,8 @@ std::vector<CrawledPage> crawl(const Url& seed, Fetcher& fetcher, const CrawlOpt
     Frontier frontier(options.max_depth, options.max_pages);
     std::unordered_map<std::string, RobotsRules> robots;
     std::set<std::pair<std::uint64_t, std::size_t>> fingerprints;
+    std::unordered_map<std::string, std::size_t> document_of;
+    std::vector<std::pair<std::size_t, std::string>> link_pairs;
     HostRateLimiter limiter;
     std::vector<CrawledPage> pages;
 
@@ -139,6 +160,7 @@ std::vector<CrawledPage> crawl(const Url& seed, Fetcher& fetcher, const CrawlOpt
         page.status = result->status;
         page.depth = entry->depth;
 
+        std::vector<std::string> outgoing;
         if (result->status == 200 && result->content_type.starts_with("text/html")) {
             const HtmlPage parsed = parse_html(result->body);
             page.title = parsed.title;
@@ -152,6 +174,7 @@ std::vector<CrawledPage> crawl(const Url& seed, Fetcher& fetcher, const CrawlOpt
                 if (options.same_host_only && target->host != seed.host) {
                     continue;
                 }
+                outgoing.push_back(url_to_string(*target));
                 frontier.push(*target, entry->depth + 1);
             }
         }
@@ -159,8 +182,17 @@ std::vector<CrawledPage> crawl(const Url& seed, Fetcher& fetcher, const CrawlOpt
         pages.push_back(std::move(page));
 
         if (options.output_dir.has_value() && result->status == 200) {
-            write_page(*options.output_dir, pages.size(), pages.back());
+            const std::size_t ordinal = pages.size();
+            write_page(*options.output_dir, ordinal, pages.back());
+            document_of[pages.back().url] = ordinal;
+            for (std::string& target : outgoing) {
+                link_pairs.emplace_back(ordinal, std::move(target));
+            }
         }
+    }
+
+    if (options.output_dir.has_value()) {
+        write_links(*options.output_dir, document_of, link_pairs);
     }
 
     return pages;

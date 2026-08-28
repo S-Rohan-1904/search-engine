@@ -108,6 +108,36 @@ something to exploit. Together they are 5.2x smaller here, and the breakdown
 shows why: postings and positions compress eightfold, while the dictionary
 manages 3.1x because most of its bytes are the term strings themselves.
 
+### Snippets, spelling and completion
+
+```console
+$ ./build/search snippet corpus/fixtures doc_001 cats mat
+[Cats] and [Mats]
+
+The [cat] sat on the [mat]. The [cat] was happy on that [mat]. ...
+
+$ ./build/search suggest corpus/fixtures cta
+cat 2 7
+star 2 4
+data 2 3
+
+$ ./build/search complete corpus/fixtures ca
+cat 7
+care 1
+carrot 1
+```
+
+Snippets are cut out of the original text using the byte offsets the tokenizer
+recorded, so the reader sees the document's own capitalization and punctuation
+while matching still happens on analyzed terms. `snippet` is the one query
+command that needs a corpus directory rather than an index: the index stores
+terms, not text.
+
+`suggest` walks a BK-tree over the dictionary, using the triangle inequality to
+skip whole subtrees that cannot contain a near match. `complete` walks a trie.
+Both rank by document frequency, on the theory that what the corpus talks about
+is the best guess at what the searcher means.
+
 ### Crawling
 
 ```console
@@ -145,6 +175,31 @@ $ ./build/search bm25 --threads 8 corpus/fixtures cat mat
 at any thread count, down to the bytes of the index file: slices are merged in
 order, and scoring shards by document rather than by term so that no
 floating-point sum is ever regrouped.
+
+### Incremental indexing and PageRank
+
+```console
+$ ./build/search index-update corpus/fixtures index.bin
+added 30
+updated 0
+removed 0
+unchanged 0
+
+$ ./build/search index-update corpus/fixtures index.bin
+added 0
+updated 0
+removed 0
+unchanged 30
+```
+
+The index records a hash of each document's bytes, so an update re-analyzes only
+what changed and carries everything else across from the previous index by
+reconstructing its token stream from the stored positions. The result is
+byte-identical to a full rebuild, so no drift accumulates over repeated updates.
+
+`crawl --out` writes a `links.tsv` alongside the corpus, and `pagerank` scores it
+by power iteration with the usual 0.85 damping, redistributing the score of
+dangling pages rather than losing it.
 
 Run `./build/search` with no arguments for the full command list.
 
@@ -250,7 +305,8 @@ query made entirely of stopwords matches nothing.
 - [x] Binary on-disk index with delta + variable-byte encoded postings
 - [x] Parallel index construction with a deterministic merge
 - [x] A crawler for building corpora from the web
-- [ ] Snippet generation
-- [ ] Spelling correction (edit distance over a BK-tree)
-- [ ] Trie-backed autocomplete
-- [ ] Incremental indexing
+- [x] Snippet generation
+- [x] Spelling correction (edit distance over a BK-tree)
+- [x] Trie-backed autocomplete
+- [x] Incremental indexing
+- [x] PageRank over the crawl's link graph
