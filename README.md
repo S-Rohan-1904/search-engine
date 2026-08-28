@@ -108,6 +108,32 @@ something to exploit. Together they are 5.2x smaller here, and the breakdown
 shows why: postings and positions compress eightfold, while the dictionary
 manages 3.1x because most of its bytes are the term strings themselves.
 
+### Crawling
+
+```console
+$ ./build/search crawl --mirror tests/fixtures/site http://example.com/
+0 200 http://example.com/
+1 200 http://example.com/a.html
+1 200 http://example.com/b.html
+1 200 http://example.com/deep/c.html
+1 200 http://example.com/private/public.html
+
+$ ./build/search crawl --out crawled https://example.org/
+$ ./build/search bm25 crawled cats
+```
+
+The crawler is breadth first, obeys robots.txt including `Crawl-delay`, spaces
+its requests per host, and drops pages whose bytes it has already seen. `--out`
+writes each page as a corpus document, so a crawl feeds straight into the index.
+
+`--mirror <dir>` serves a site from the filesystem instead of the network, which
+is how the tests exercise the crawler without depending on anything staying up.
+HTTP fetching uses libcurl when the build found it; without curl the mirror path
+still works.
+
+`url`, `url-resolve`, `robots`, `crawl-delay`, `html-text` and `html-links`
+expose the individual pieces.
+
 ### Threads
 
 ```console
@@ -201,6 +227,11 @@ of the list. Three separate things rely on the resulting invariant, so the
 loader re-validates it when reading an index from disk rather than trusting the
 file.
 
+**Duplicate pages are a ranking bug, not a bandwidth one.** The crawler drops a
+page whose bytes it has already fetched, because indexing one document twice
+inflates its terms' document frequency, drags the average document length BM25
+divides by, and lets one page take two result slots.
+
 **A query term that analyzes away carries no constraint.** Searching for
 `the cat` means `cat`, not the empty set, and `NOT the` excludes nothing. Only a
 query made entirely of stopwords matches nothing.
@@ -218,7 +249,7 @@ query made entirely of stopwords matches nothing.
 - [x] TF-IDF, then BM25, with top-K selection through a min-heap
 - [x] Binary on-disk index with delta + variable-byte encoded postings
 - [x] Parallel index construction with a deterministic merge
-- [ ] A crawler for building corpora from the web
+- [x] A crawler for building corpora from the web
 - [ ] Snippet generation
 - [ ] Spelling correction (edit distance over a BK-tree)
 - [ ] Trie-backed autocomplete

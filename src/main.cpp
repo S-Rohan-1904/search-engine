@@ -1,6 +1,9 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <chrono>
+#include <fstream>
+#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -9,14 +12,19 @@
 
 #include "analyzer.hpp"
 #include "corpus.hpp"
+#include "crawler.hpp"
 #include "document.hpp"
+#include "fetcher.hpp"
+#include "html.hpp"
 #include "evaluator.hpp"
 #include "index.hpp"
 #include "index_io.hpp"
 #include "normalize.hpp"
 #include "query.hpp"
+#include "robots.hpp"
 #include "ranking.hpp"
 #include "thread_pool.hpp"
+#include "url.hpp"
 #include "thread_pool.hpp"
 #include "stemmer.hpp"
 #include "stopwords.hpp"
@@ -66,6 +74,21 @@ int usage() {
                  "                               save an index to disk\n"
                  "  index-size <source>          encoded size under each encoding\n"
                  "  pool-sum <threads> <n>       sum of squares below n, on a thread pool\n"
+                 "  url <url>                    normalize a url\n"
+                 "  url-resolve <base> <ref>     resolve a link against a base url\n"
+                 "  robots <file> <agent> <path> is this path allowed?\n"
+                 "  crawl-delay <file> <agent> <floor_ms>\n"
+                 "                               milliseconds to wait between requests\n"
+                 "  html-text <file>             title and visible text of an html file\n"
+                 "  html-links <base> <file>     links from an html file, resolved\n"
+                 "  crawl [options] <seed_url>   crawl from a seed url\n"
+                 "      --delay <ms>             floor between requests to one host\n"
+                 "      --mirror <dir>           fetch from a mirrored site on disk\n"
+                 "      --out <dir>              write the pages as a corpus\n"
+                 "      --max-pages <n>          stop after n pages\n"
+                 "      --max-depth <n>          follow links at most n deep\n"
+                 "      --user-agent <name>      the name robots.txt is matched against\n"
+                 "      --all-hosts              follow links off the seed host\n"
                  "\n"
                  "<source> is a corpus directory or a saved index file.\n";
     return 2;
@@ -328,6 +351,215 @@ int cmd_phrase(const std::vector<std::string>& args) {
         return 1;
     }
     return run_parsed_query(args, "\"" + args[1] + "\"");
+}
+
+bool read_text_file(const std::filesystem::path& path, std::string& out) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        std::cerr << "search: cannot read " << path.string() << "\n";
+        return false;
+    }
+    out.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    return true;
+}
+
+int cmd_url(const std::vector<std::string>& args) {
+    if (args.size() != 1) {
+        return usage();
+    }
+
+    const std::optional<Url> url = parse_url(args[0]);
+    if (!url.has_value()) {
+        std::cerr << "search: not an http url: " << args[0] << "\n";
+        return 1;
+    }
+
+    std::cout << url_to_string(*url) << "\n";
+    return 0;
+}
+
+int cmd_url_resolve(const std::vector<std::string>& args) {
+    if (args.size() != 2) {
+        return usage();
+    }
+
+    const std::optional<Url> base = parse_url(args[0]);
+    if (!base.has_value()) {
+        std::cerr << "search: not an http url: " << args[0] << "\n";
+        return 1;
+    }
+
+    const std::optional<Url> resolved = resolve_url(*base, args[1]);
+    if (!resolved.has_value()) {
+        std::cerr << "search: cannot resolve: " << args[1] << "\n";
+        return 1;
+    }
+
+    std::cout << url_to_string(*resolved) << "\n";
+    return 0;
+}
+
+int cmd_robots(const std::vector<std::string>& args) {
+    if (args.size() != 3) {
+        return usage();
+    }
+
+    std::string text;
+    if (!read_text_file(args[0], text)) {
+        return 1;
+    }
+
+    const RobotsRules rules = RobotsRules::parse(text, args[1]);
+    std::cout << (rules.allows(args[2]) ? "allow" : "disallow") << "\n";
+    return 0;
+}
+
+int cmd_html_text(const std::vector<std::string>& args) {
+    if (args.size() != 1) {
+        return usage();
+    }
+
+    std::string text;
+    if (!read_text_file(args[0], text)) {
+        return 1;
+    }
+
+    const HtmlPage page = parse_html(text);
+    std::cout << "title: " << page.title << "\n" << page.text << "\n";
+    return 0;
+}
+
+int cmd_html_links(const std::vector<std::string>& args) {
+    if (args.size() != 2) {
+        return usage();
+    }
+
+    const std::optional<Url> base = parse_url(args[0]);
+    if (!base.has_value()) {
+        std::cerr << "search: not an http url: " << args[0] << "\n";
+        return 1;
+    }
+
+    std::string text;
+    if (!read_text_file(args[1], text)) {
+        return 1;
+    }
+
+    for (const std::string& href : parse_html(text).links) {
+        const std::optional<Url> resolved = resolve_url(*base, href);
+        if (resolved.has_value()) {
+            std::cout << url_to_string(*resolved) << "\n";
+        }
+    }
+    return 0;
+}
+
+int cmd_crawl_delay(const std::vector<std::string>& args) {
+    if (args.size() != 3) {
+        return usage();
+    }
+
+    std::string text;
+    if (!read_text_file(args[0], text)) {
+        return 1;
+    }
+
+    std::size_t floor = 0;
+    if (!parse_count(args[2], floor)) {
+        std::cerr << "search: floor must be a non-negative integer: " << args[2] << "\n";
+        return 1;
+    }
+
+    const RobotsRules rules = RobotsRules::parse(text, args[1]);
+    std::cout << delay_for(rules, std::chrono::milliseconds(static_cast<long long>(floor))).count()
+              << "\n";
+    return 0;
+}
+
+int cmd_crawl(const std::vector<std::string>& args) {
+    std::vector<std::string> rest = args;
+    CrawlOptions options;
+    std::optional<std::filesystem::path> mirror;
+    bool delay_given = false;
+
+    while (rest.size() >= 1 && rest.front().starts_with("--")) {
+        const std::string flag = rest.front();
+
+        if (flag == "--all-hosts") {
+            options.same_host_only = false;
+            rest.erase(rest.begin());
+            continue;
+        }
+
+        if (rest.size() < 2) {
+            return usage();
+        }
+        const std::string value = rest[1];
+
+        if (flag == "--mirror") {
+            mirror = value;
+        } else if (flag == "--out") {
+            options.output_dir = value;
+        } else if (flag == "--user-agent") {
+            options.user_agent = value;
+        } else if (flag == "--max-pages") {
+            if (!parse_count(value, options.max_pages)) {
+                std::cerr << "search: max-pages must be a non-negative integer: " << value << "\n";
+                return 1;
+            }
+        } else if (flag == "--delay") {
+            std::size_t milliseconds = 0;
+            if (!parse_count(value, milliseconds)) {
+                std::cerr << "search: delay must be a non-negative integer: " << value << "\n";
+                return 1;
+            }
+            options.min_delay = std::chrono::milliseconds(static_cast<long long>(milliseconds));
+            delay_given = true;
+        } else if (flag == "--max-depth") {
+            if (!parse_count(value, options.max_depth)) {
+                std::cerr << "search: max-depth must be a non-negative integer: " << value << "\n";
+                return 1;
+            }
+        } else {
+            std::cerr << "search: unknown option: " << flag << "\n";
+            return 1;
+        }
+
+        rest.erase(rest.begin(), rest.begin() + 2);
+    }
+
+    if (rest.size() != 1) {
+        return usage();
+    }
+
+    const std::optional<Url> seed = parse_url(rest[0]);
+    if (!seed.has_value()) {
+        std::cerr << "search: not an http url: " << rest[0] << "\n";
+        return 1;
+    }
+
+    std::unique_ptr<Fetcher> fetcher;
+    if (mirror.has_value() && !delay_given) {
+        options.min_delay = std::chrono::milliseconds(0);
+    }
+    if (mirror.has_value()) {
+        std::error_code ec;
+        if (!std::filesystem::is_directory(*mirror, ec)) {
+            return reject_missing_corpus(*mirror);
+        }
+        fetcher = make_file_fetcher(*mirror);
+    } else {
+        fetcher = make_http_fetcher(options.user_agent, 10);
+        if (fetcher == nullptr) {
+            std::cerr << "search: this build cannot fetch over http; pass --mirror\n";
+            return 1;
+        }
+    }
+
+    for (const CrawledPage& page : crawl(*seed, *fetcher, options)) {
+        std::cout << page.depth << " " << page.status << " " << page.url << "\n";
+    }
+    return 0;
 }
 
 int cmd_pool_sum(const std::vector<std::string>& args) {
@@ -839,6 +1071,27 @@ int main(int argc, char** argv) {
     }
     if (command == "lengths") {
         return cmd_lengths(rest);
+    }
+    if (command == "url") {
+        return cmd_url(rest);
+    }
+    if (command == "url-resolve") {
+        return cmd_url_resolve(rest);
+    }
+    if (command == "robots") {
+        return cmd_robots(rest);
+    }
+    if (command == "html-text") {
+        return cmd_html_text(rest);
+    }
+    if (command == "html-links") {
+        return cmd_html_links(rest);
+    }
+    if (command == "crawl-delay") {
+        return cmd_crawl_delay(rest);
+    }
+    if (command == "crawl") {
+        return cmd_crawl(rest);
     }
     if (command == "pool-sum") {
         return cmd_pool_sum(rest);

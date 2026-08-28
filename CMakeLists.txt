@@ -25,6 +25,7 @@ if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
 endif()
 
 find_package(Threads REQUIRED)
+find_package(CURL)
 
 add_executable(search
   src/main.cpp
@@ -41,8 +42,21 @@ add_executable(search
   src/ranking.cpp
   src/index_io.cpp
   src/thread_pool.cpp
+  src/url.cpp
+  src/robots.cpp
+  src/html.cpp
+  src/frontier.cpp
+  src/fetcher.cpp
+  src/crawler.cpp
 )
 
 target_include_directories(search PRIVATE src)
 target_link_libraries(search PRIVATE Threads::Threads)
+
+# HTTP fetching is optional: without libcurl the crawler still runs against a
+# mirrored site on disk, which is what the tests use.
+if(CURL_FOUND)
+  target_link_libraries(search PRIVATE CURL::libcurl)
+  target_compile_definitions(search PRIVATE SEARCH_HAVE_CURL)
+endif()
 target_compile_options(search PRIVATE -Wall -Wextra)

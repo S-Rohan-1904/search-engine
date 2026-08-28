@@ -1,0 +1,12 @@
+# Rules for the whole site.
+User-agent: *
+Disallow: /private/
+Allow: /private/public.html
+Disallow: /*.pdf$
+
+User-agent: greedybot
+Disallow: /
+
+User-agent: slowbot
+Crawl-delay: 2.5
+Disallow: /private/
