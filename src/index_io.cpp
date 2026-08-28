@@ -1,5 +1,7 @@
 #include "index_io.hpp"
 
+#include "index_map.hpp"
+
 #include <cstdint>
 #include <fstream>
 #include <string_view>
@@ -133,76 +135,15 @@ bool uses_deltas(IndexEncoding encoding) {
 
 namespace {
 
-std::vector<unsigned char> encode_into(const InvertedIndex& index, IndexEncoding encoding,
-                                       IndexSizeReport* report) {
-    Writer writer(encoding);
-    for (const unsigned char byte : kMagic) {
-        writer.raw_byte(byte);
-    }
-    writer.fixed32(kVersion);
-    writer.raw_byte(static_cast<unsigned char>(encoding));
-
-    IndexSizeReport sizes{};
-    std::size_t mark = writer.size();
-    sizes.header = mark;
-
-    const std::vector<std::string>& ids = index.document_ids();
-    writer.number(ids.size());
-    for (std::size_t doc_id = 0; doc_id < ids.size(); doc_id++) {
-        writer.text(ids[doc_id]);
-        writer.number(index.document_length(doc_id));
-        writer.number(index.document_fingerprint(doc_id));
-    }
-    sizes.documents = writer.size() - mark;
-    mark = writer.size();
-
-    const std::vector<std::string> terms = index.terms();
-    writer.number(terms.size());
-    for (const std::string& term : terms) {
-        const std::vector<Posting>& postings = index.postings(term);
-        writer.text(term);
-        writer.number(postings.size());
-        sizes.dictionary += writer.size() - mark;
-        mark = writer.size();
-
-        std::size_t previous_doc_id = 0;
-        for (const Posting& posting : postings) {
-            writer.number(uses_deltas(encoding) ? posting.doc_id - previous_doc_id
-                                                : posting.doc_id);
-            previous_doc_id = posting.doc_id;
-
-            writer.number(posting.frequency);
-            writer.number(posting.positions.size());
-            sizes.postings += writer.size() - mark;
-            mark = writer.size();
-
-            std::size_t previous_position = 0;
-            for (const std::size_t position : posting.positions) {
-                writer.number(uses_deltas(encoding) ? position - previous_position : position);
-                previous_position = position;
-            }
-            sizes.positions += writer.size() - mark;
-            mark = writer.size();
-        }
-    }
-
-    std::vector<unsigned char> bytes = writer.take();
-    sizes.total = bytes.size();
-    if (report != nullptr) {
-        *report = sizes;
-    }
-    return bytes;
-}
-
 }
 
 std::vector<unsigned char> encode_index(const InvertedIndex& index, IndexEncoding encoding) {
-    return encode_into(index, encoding, nullptr);
+    return encode_index_v3(index, encoding, nullptr);
 }
 
 IndexSizeReport measure_index(const InvertedIndex& index, IndexEncoding encoding) {
     IndexSizeReport report{};
-    encode_into(index, encoding, &report);
+    encode_index_v3(index, encoding, &report);
     return report;
 }
 
@@ -366,9 +307,22 @@ std::optional<InvertedIndex> read_index_file(const std::filesystem::path& path,
         return std::nullopt;
     }
 
+    // Version 3 is mapped rather than read, which is the whole point of it.
+    // An older file has no tables to map, so it still goes through the decoder
+    // that built the index in memory.
+    std::string mapped_error;
+    std::optional<MappedIndex> mapped = MappedIndex::open(path, mapped_error);
+    if (mapped.has_value()) {
+        return InvertedIndex::from_mapped(std::move(*mapped));
+    }
+
     const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)),
                                            std::istreambuf_iterator<char>());
-    return decode_index(bytes, error);
+    std::optional<InvertedIndex> decoded = decode_index(bytes, error);
+    if (!decoded.has_value() && error.empty()) {
+        error = mapped_error;
+    }
+    return decoded;
 }
 
 std::optional<IndexEncoding> parse_encoding(std::string_view name) {

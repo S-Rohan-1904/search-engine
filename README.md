@@ -1,335 +1,154 @@
-# search-engine
+# search
 
-A full-text search engine written from scratch in C++20: inverted index,
-positional postings, boolean and phrase queries, BM25 ranking, a compressed
-on-disk index, and parallel index construction. No search or IR libraries; the
-tokenizer, stemmer, index, compression codecs and ranking functions are all
-implemented here.
+A search engine written from scratch in C++20 — crawler, indexer, ranker and
+query language — with no search library underneath it. No Lucene, no Elastic,
+no third-party index. The standard library, and libcurl for HTTP.
 
-## Building
-
-Requires CMake ≥ 3.20 and a C++20 compiler.
+It indexes 278,214 Wikipedia documents in 16 seconds, answers a query in 4 ms,
+and scores 0.6714 nDCG@10 on a public benchmark against a published Lucene
+baseline of 0.665.
 
 ```console
-$ cmake -S . -B build
-$ cmake --build build -j
+$ search wiki-import simplewiki.json.gz simplewiki.corpus
+$ search index-write --threads 8 simplewiki.corpus simplewiki.idx
+$ search query --snippet simplewiki.idx 'solar system'
+1. doc_00015284  16.1311
+   ...Renewable energy Renewable resource [Solar] power "[Solar] [systems]
+   projects"...
 ```
 
-The binary lands at `build/search`.
+## Numbers
 
-## Usage
-
-Most commands take a *source*, which is either a corpus directory or a saved
-index file. The engine builds or loads whichever it is given.
-
-### Searching
-
-```console
-$ ./build/search query --limit 2 --snippet --max-chars 90 corpus/fixtures "cat AND mat"
-1. doc_001  7.4906
-   [Cats] and [Mats] The [cat] sat on the [mat]. The [cat] was happy on that [mat]. A [mat] is a flat rug...
-
-$ ./build/search repl --limit 2 corpus/fixtures
-> cat OR oven
-1. doc_018  2.9186
-2. doc_003  2.5076
-> :limit 1
-> "cat sat"
-1. doc_001  5.3844
-> :quit
-```
-
-`query` is the whole engine in one command: the boolean expression decides which
-documents qualify, BM25 decides what order they come in, and `--snippet` shows
-why. `--tsv` prints id and score for piping. `repl` loads the index once and
-answers until end of input, with `:limit`, `:scorer` and `:snippet` adjustable
-mid-session.
-
-The pieces are also exposed on their own:
-
-```console
-$ ./build/search match corpus/fixtures 'cat AND NOT (mat OR sat)'
-doc_002
-doc_003
-doc_004
-
-$ ./build/search phrase corpus/fixtures "sun is a star"
-doc_026
-
-$ ./build/search top --bm25 corpus/fixtures 3 cat mat
-doc_001 7.4906
-doc_003 2.5076
-doc_004 2.1294
-```
-
-`match` accepts `AND`, `OR`, `NOT`, parentheses and `"quoted phrases"`.
-Operators are uppercase, so `rock and roll` searches for three words rather
-than a boolean. Two adjacent words mean AND.
-
-Phrase matching compares positions, not adjacent words, so the stopwords a
-phrase contains still occupy their slots: `sun is a star` requires a gap of
-three and `sun star` does not match it.
-
-### Inspecting the pipeline
-
-```console
-$ ./build/search analyze "The cats were running quickly"
-1 4 cat
-3 14 run
-4 22 quickli
-```
-
-`analyze` runs the full chain (tokenize, normalize, drop stopwords, stem) and
-prints one line per surviving term: its position in the token stream, its byte
-offset in the source, and the term itself. Positions are never renumbered when
-a token is filtered out, so the gaps above are real, and phrase matching relies
-on them.
-
-`tokenize`, `normalize`, `terms`, `stopword`, `stem` and `stem-step` expose the
-individual stages; `analyze-doc` runs the chain over a document on disk.
-
-### Inspecting the index
-
-```console
-$ ./build/search index-stats corpus/fixtures
-documents: 30
-terms: 235
-postings: 343
-
-$ ./build/search positions corpus/fixtures cat
-doc_001 0 4 10 24
-doc_002 15
-doc_003 2 5 13 18 24
-```
-
-`index-terms` lists every term with its document frequency, `postings` and `tf`
-give the documents and counts for one term, and `lengths` reports document
-lengths and the corpus average.
-
-### Saving and loading
-
-```console
-$ ./build/search index-write corpus/fixtures index.bin
-$ ./build/search match index.bin 'cat AND mat'
-doc_001
-```
-
-`--encoding plain|delta|varbyte` selects the integer layout, and `index-size`
-reports what each one costs:
-
-```console
-$ ./build/search index-size corpus/fixtures
-plain 17570 header 9 documents 698 dictionary 4895 postings 8232 positions 3736
-delta 17570 header 9 documents 698 dictionary 4895 postings 8232 positions 3736
-varbyte 3375 header 9 documents 271 dictionary 1599 postings 1029 positions 467
-ratio 5.21
-```
-
-Delta encoding alone changes nothing, because every number is still eight fixed
-bytes; it exists to make the values small so variable-byte encoding has
-something to exploit. Together they are 5.2x smaller here, and the breakdown
-shows why: postings and positions compress eightfold, while the dictionary
-manages 3.1x because most of its bytes are the term strings themselves.
-
-### Snippets, spelling and completion
-
-```console
-$ ./build/search snippet corpus/fixtures doc_001 cats mat
-[Cats] and [Mats]
-
-The [cat] sat on the [mat]. The [cat] was happy on that [mat]. ...
-
-$ ./build/search suggest corpus/fixtures cta
-cat 2 7
-star 2 4
-data 2 3
-
-$ ./build/search complete corpus/fixtures ca
-cat 7
-care 1
-carrot 1
-```
-
-Snippets are cut out of the original text using the byte offsets the tokenizer
-recorded, so the reader sees the document's own capitalization and punctuation
-while matching still happens on analyzed terms. `snippet` is the one query
-command that needs a corpus directory rather than an index: the index stores
-terms, not text.
-
-`suggest` walks a BK-tree over the dictionary, using the triangle inequality to
-skip whole subtrees that cannot contain a near match. `complete` walks a trie.
-Both rank by document frequency, on the theory that what the corpus talks about
-is the best guess at what the searcher means.
-
-### Crawling
-
-```console
-$ ./build/search crawl --mirror tests/fixtures/site http://example.com/
-0 200 http://example.com/
-1 200 http://example.com/a.html
-1 200 http://example.com/b.html
-1 200 http://example.com/deep/c.html
-1 200 http://example.com/private/public.html
-
-$ ./build/search crawl --out crawled https://example.org/
-$ ./build/search bm25 crawled cats
-```
-
-The crawler is breadth first, obeys robots.txt including `Crawl-delay`, spaces
-its requests per host, and drops pages whose bytes it has already seen. `--out`
-writes each page as a corpus document, so a crawl feeds straight into the index.
-
-`--mirror <dir>` serves a site from the filesystem instead of the network, which
-is how the tests exercise the crawler without depending on anything staying up.
-HTTP fetching uses libcurl when the build found it; without curl the mirror path
-still works.
-
-`url`, `url-resolve`, `robots`, `crawl-delay`, `html-text` and `html-links`
-expose the individual pieces.
-
-### Threads
-
-```console
-$ ./build/search index-write --threads 8 corpus/fixtures index.bin
-$ ./build/search bm25 --threads 8 corpus/fixtures cat mat
-```
-
-`--threads` parallelizes index construction and scoring. Results are identical
-at any thread count, down to the bytes of the index file: slices are merged in
-order, and scoring shards by document rather than by term so that no
-floating-point sum is ever regrouped.
-
-### Incremental indexing and PageRank
-
-```console
-$ ./build/search index-update corpus/fixtures index.bin
-added 30
-updated 0
-removed 0
-unchanged 0
-
-$ ./build/search index-update corpus/fixtures index.bin
-added 0
-updated 0
-removed 0
-unchanged 30
-```
-
-The index records a hash of each document's bytes, so an update re-analyzes only
-what changed and carries everything else across from the previous index by
-reconstructing its token stream from the stored positions. The result is
-byte-identical to a full rebuild, so no drift accumulates over repeated updates.
-
-`crawl --out` writes a `links.tsv` alongside the corpus, and `pagerank` scores it
-by power iteration with the usual 0.85 damping, redistributing the score of
-dangling pages rather than losing it.
-
-Run `./build/search` with no arguments for the full command list.
-
-## Tests
-
-End-to-end tests drive the compiled binary from the command line and check its
-stdout and exit codes, so the internals stay free to change.
-
-```console
-$ ./run_tests.sh           # build, then run every suite
-$ ./run_tests.sh phrase    # only suites matching "phrase"
-$ ./run_tests.sh --list    # list the suites
-```
-
-Each suite in `tests/cases/` is a plain Python list of cases: an argv, an
-expected stdout, an expected exit code. There are 561 checks across 33 suites.
-
-Expected values for the parts that are easy to get subtly wrong were not written
-by hand. The stemmer was checked against a second implementation over 20,000
-dictionary words and against every worked example in Porter's paper; query
-evaluation and ranking against independently written reference implementations
-over randomly generated queries; the on-disk format by comparing every command
-between a directory-built index and a file-loaded one across all three
-encodings. The threading is checked by running each command at seven different
-thread counts and hashing the results, and under ThreadSanitizer.
-
-## Corpus
-
-`corpus/fixtures/` holds 30 short hand-written documents across four loosely
-overlapping topics (animals, programming, cooking, space). They are deliberately
-small, small enough to compute a BM25 score by hand and check it against what
-the engine reports. Larger corpora (a Wikipedia abstracts subset) get wired in
-once the crawler exists and throughput starts to matter.
-
-Document format:
-
-```
-title: Cats and Mats
-
-The cat sat on the mat. ...
-```
-
-## Layout
-
-```
-src/                 engine source
-tests/runner.py      the end-to-end harness
-tests/cases/         one suite per area of behaviour
-tests/fixtures/      small corpora and index files used only by tests
-corpus/fixtures/     the working corpus
-```
+Full table, with the command that reproduces each figure, in
+[BENCHMARKS.md](BENCHMARKS.md). Apple M2, 8 cores, warm page cache.
 
 | | |
 |---|---|
-| `tokenizer` `normalize` `stopwords` `stemmer` `analyzer` | text to indexable terms |
-| `corpus` `document` | reading the corpus off disk |
-| `index` | the inverted index |
-| `query` | query lexer and parser |
-| `evaluator` | boolean and phrase evaluation |
-| `ranking` | TF-IDF, BM25, top-K |
-| `index_io` | the binary format and its codecs |
-| `thread_pool` | workers for parallel build and scoring |
+| Corpus | 278,214 docs, 1,443,435 terms, 25,643,127 postings |
+| Index build | 15.9 s on 8 threads, 15,435 docs/s |
+| Index size | 188 MB, 5.46x smaller than uncompressed |
+| Startup | 50 ms, whole process, memory-mapped index |
+| Query latency | p50 4.09 ms, p95 33.8 ms, p99 44.5 ms |
+| With snippets | p50 6.43 ms, p95 42.3 ms |
+| Memory, serving | 101 MB |
+| Memory, building | 0.72–2.92 GB, set by block size |
+| Relevance | nDCG@10 0.6714 on BEIR SciFact (Lucene BM25: 0.665) |
+| Tests | 872 checks, zero warnings under `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion` |
 
-## Notes on the design
+## What it does
 
-A few decisions that shape everything above.
+**Text processing.** Tokenizer, Unicode-aware normalization that folds Latin-1
+and Latin Extended-A to ASCII (`Zürich` → `zurich`, `Straße` → `strasse`), a
+full Porter stemmer implemented step by step, and stopword removal.
 
-**Positions are never renumbered.** Filters may rewrite a token or drop it, but
-the survivors keep the position and byte offset they were tokenized with. Phrase
-search depends on the resulting gaps being real, and byte offsets are what
-snippet extraction will need to slice text back out of the source.
+**Index.** Positional inverted index. Delta-encoded, variable-byte compressed,
+5.46x smaller than a flat encoding. Built in parallel across threads with a
+deterministic merge — the same bytes for any thread count. Incremental updates
+re-analyze only documents whose content hash changed.
 
-**Postings hold integers, not strings.** Document ids are ordinals into one
-vector of names. That keeps postings small, lets intersection be a linear merge
-over sorted arrays, and is what makes delta encoding possible later.
+**Query language.** `AND`, `OR`, `NOT`, parentheses, and `"quoted phrases"`,
+lexed and parsed into a boolean tree, evaluated over postings lists. Phrase
+matching uses the stored token positions.
 
-**Sorted, duplicate-free postings are a build-loop guarantee.** Documents are
-added in increasing ordinal order, so deduplication is a check against the back
-of the list. Three separate things rely on the resulting invariant, so the
-loader re-validates it when reading an index from disk rather than trusting the
-file.
+**Ranking.** TF-IDF and BM25, scored in parallel across document shards.
+PageRank over the crawled link graph.
 
-**Duplicate pages are a ranking bug, not a bandwidth one.** The crawler drops a
-page whose bytes it has already fetched, because indexing one document twice
-inflates its terms' document frequency, drags the average document length BM25
-divides by, and lets one page take two result slots.
+**Crawler.** robots.txt parsing, a BFS frontier with URL normalization and
+deduplication, HTML-to-text extraction, rate limiting, and content-hash
+duplicate detection.
 
-**A query term that analyzes away carries no constraint.** Searching for
-`the cat` means `cat`, not the empty set, and `NOT the` excludes nothing. Only a
-query made entirely of stopwords matches nothing.
+**On top of that.** Snippet generation with query terms highlighted, spelling
+correction via a BK-tree over Levenshtein distance, trie autocomplete, and an
+interactive REPL.
 
-## Roadmap
+## The parts worth reading
 
-- [x] Corpus ingestion and document listing
-- [x] Tokenizer: case folding, punctuation, numbers, hyphens
-- [x] Stopword filtering
-- [x] Porter stemmer
-- [x] Inverted index with term frequencies and positions
-- [x] Query parsing to a boolean AST
-- [x] Boolean retrieval: AND / OR / NOT over postings lists
-- [x] Phrase queries via positional intersection
-- [x] TF-IDF, then BM25, with top-K selection through a min-heap
-- [x] Binary on-disk index with delta + variable-byte encoded postings
-- [x] Parallel index construction with a deterministic merge
-- [x] A crawler for building corpora from the web
-- [x] Snippet generation
-- [x] Spelling correction (edit distance over a BK-tree)
-- [x] Trie-backed autocomplete
-- [x] Incremental indexing
-- [x] PageRank over the crawl's link graph
+**A memory-mapped index format.** Loading the index used to mean decoding all
+25.6 million postings into the heap — 2.2 GB from a 188 MB file, 3.5 seconds
+before the first query could run. The format now stores fixed-width tables for
+the per-document arrays and a sorted table of term offsets, so opening it is a
+`mmap` and a header read, finding a term is a binary search over mapped bytes,
+and a postings list is decoded only when a query asks for it. **Startup went
+from 3.48 s to 0.05 s and resident memory from 2.2 GB to 101 MB, with query
+latency unchanged.**
+
+**Building an index larger than memory.** The in-memory build peaks at 2.9 GB
+for a 188 MB index, which caps corpus size for reasons that have nothing to do
+with the disk. `index-build` indexes a block of documents at a time, writes
+each block, and merges the blocks in one pass over sorted term streams. Peak
+memory becomes a function of block size — 0.72 GB at 5,000 documents per block
+— and **the output is byte-identical to the in-memory build's at every block
+size**, which is what makes the two interchangeable.
+
+**Two quadratic bugs that only a real corpus exposes.** Both were invisible on
+a 30-document test corpus. One made indexing 39 billion string comparisons; one
+made a single query O(postings × documents) by re-summing every document length
+inside the BM25 inner loop. Ten queries ran past ten minutes. They are the
+reason the build is 15.9 s and the query is 4 ms.
+
+**Skip pointers, measured and rejected.** Galloping search in postings
+intersection — the textbook optimisation — made intersection-heavy queries
+*twice as slow*. The scan was never the cost; decoding the postings was. The
+attempt and the reason are kept rather than quietly dropped.
+
+## Measuring relevance honestly
+
+Precision measured against judgements written for the engine being measured is
+not evidence of anything. This is scored against [BEIR](https://github.com/beir-cellar/beir),
+whose corpora, queries and relevance judgements are public, independent, and
+come with published BM25 baselines.
+
+| Dataset | Documents | Queries | nDCG@10 | Published BEIR BM25 |
+|---|---|---|---|---|
+| SciFact | 5,183 | 300 | 0.6714 | 0.665 |
+| TREC-COVID | 171,331 | 50 | 0.3034 | 0.656 |
+
+SciFact matches. TREC-COVID does not, and the reason is not yet known — the
+BM25 parameters have been ruled out. The gap is documented rather than omitted,
+and the claim made here is the narrow one it supports.
+
+## Building
+
+Needs CMake 3.20+, a C++20 compiler, and Python 3. libcurl is optional and only
+the crawler uses it.
+
+```console
+$ cmake -S . -B build && cmake --build build -j
+$ python3 tests/runner.py
+All 872 checks passing.
+```
+
+Tests are end-to-end: each case runs the real binary and compares its output,
+so nothing passes because a mock agreed with it.
+
+[SETUP.md](SETUP.md) goes from a fresh clone to a Wikipedia index and the
+benchmarks, in about twenty minutes.
+
+Reproduce the numbers, or look at what a query set actually returns:
+
+```console
+$ ./tools/bench.sh corpus/wikipedia/simplewiki.corpus
+$ ./tools/analyze.py corpus/wikipedia/simplewiki.idx
+```
+
+All commands: [COMMANDS.md](COMMANDS.md).
+
+## Commands
+
+```
+search index-write [--threads n] <source> <file>   build and save an index
+search index-build [--block n] <source> <file>     build one larger than memory
+search index-update <corpus> <file>                re-index only what changed
+search query [options] <source> <query>            ranked results
+search repl [options] <source>                     interactive queries
+search match <source> <query>                      boolean matching only
+search evaluate <index> <queries> <qrels>          nDCG@10, P@10, recall@100
+search bench build|query <source> [...]            measure it yourself
+search index-size <source>                         compression breakdown
+search crawl <url> [...]                           fetch a site into a corpus
+search wiki-import <dump> <file>                   corpus from a Wikipedia dump
+search beir-import <corpus.jsonl> <file>           corpus from a BEIR dataset
+```
+
+`search` with no arguments lists all of them, including the smaller tools for
+inspecting tokenization, stemming, postings and parse trees.

@@ -14,6 +14,8 @@
 #include <vector>
 
 #include "analyzer.hpp"
+#include "beir.hpp"
+#include "index_build.hpp"
 #include "bench.hpp"
 #include "complete.hpp"
 #include "corpus.hpp"
@@ -80,6 +82,7 @@ int usage() {
                  "      --limit <n>              how many results (default 10)\n"
                  "      --scorer bm25|tfidf      which ranking function\n"
                  "      --snippet                show an excerpt under each result\n"
+                 "      --corpus <path>          where to read snippet text from\n"
                  "      --max-chars <n>          how long an excerpt may be\n"
                  "      --tsv                    id and score, tab separated\n"
                  "  repl [options] <source>      read queries until end of input\n"
@@ -90,6 +93,7 @@ int usage() {
                  "      --threads <n>            build threads (bench build)\n"
                  "      --limit <n>              results per query (bench query)\n"
                  "      --repeats <n>            times to run each query\n"
+                 "      --snippet [--corpus <p>] measure with excerpts too\n"
                  "  lengths <corpus_dir>         indexed length of each document\n"
                  "  tfidf [--threads <n>] <source> <word>...\n"
                  "                               rank documents by TF-IDF\n"
@@ -103,6 +107,12 @@ int usage() {
                  "                               re-index only what changed\n"
                  "  wiki-import [--limit <n>] [--abstracts] <dump.json|-> <file>\n"
                  "                               build a corpus from a Wikipedia CirrusSearch dump\n"
+                 "  index-build [--block <n>] [--threads <n>] <source> <file>\n"
+                 "                               build an index larger than memory, in blocks\n"
+                 "  beir-import <corpus.jsonl> <file>\n"
+                 "                               build a corpus from a BEIR dataset\n"
+                 "  evaluate [options] <source> <queries.jsonl> <qrels.tsv>\n"
+                 "                               nDCG@10, precision@10 and recall@100\n"
                  "  corpus-write <corpus_dir> <file>\n"
                  "                               pack a corpus directory into one file\n"
                  "  index-size <source>          encoded size under each encoding\n"
@@ -450,6 +460,8 @@ bool take_query_options(std::vector<std::string>& args, QueryOptions& options) {
                 std::cerr << "search: max-chars must be a positive integer: " << value << "\n";
                 return false;
             }
+        } else if (flag == "--corpus") {
+            options.corpus = value;
         } else if (flag == "--scorer") {
             if (value == "bm25") {
                 options.scorer = Scorer::Bm25;
@@ -470,12 +482,49 @@ bool take_query_options(std::vector<std::string>& args, QueryOptions& options) {
     return true;
 }
 
-std::optional<std::filesystem::path> corpus_for_snippets(const std::string& source) {
+// Where to read document text from when a query asks for snippets.
+//
+// An index file does not hold the text a snippet is cut from, so querying one
+// used to accept --snippet and print nothing. A corpus directory or .corpus
+// file is its own answer; for an index file, the corpus that built it is
+// looked for beside it under the same stem, which is what index-write leaves
+// there. `--corpus` overrides both.
+std::optional<std::filesystem::path> corpus_for_snippets(const std::string& source,
+                                                         const QueryOptions& options) {
+    if (!options.corpus.empty()) {
+        return std::filesystem::path(options.corpus);
+    }
+
     std::error_code ec;
-    if (std::filesystem::is_directory(source, ec)) {
-        return std::filesystem::path(source);
+    const std::filesystem::path path(source);
+    if (std::filesystem::is_directory(path, ec) || looks_like_corpus_file(path)) {
+        return path;
+    }
+
+    std::filesystem::path beside = path;
+    beside.replace_extension(".corpus");
+    if (beside != path && std::filesystem::is_regular_file(beside, ec)) {
+        return beside;
     }
     return std::nullopt;
+}
+
+// Opens the corpus for snippets, or returns nullptr when there is none. A
+// corpus that cannot be opened is not an error: the query still answers, it
+// just answers without excerpts.
+std::unique_ptr<CorpusReader> open_snippet_corpus(const std::string& source,
+                                                  const QueryOptions& options, bool wanted) {
+    if (!wanted) {
+        return nullptr;
+    }
+
+    const std::optional<std::filesystem::path> path = corpus_for_snippets(source, options);
+    if (!path.has_value()) {
+        return nullptr;
+    }
+
+    std::string error;
+    return open_corpus(*path, error);
 }
 
 int cmd_wiki_import(const std::vector<std::string>& args) {
@@ -551,12 +600,115 @@ int cmd_corpus_write(const std::vector<std::string>& args) {
     return 0;
 }
 
+int cmd_beir_import(const std::vector<std::string>& args) {
+    if (args.size() != 2) {
+        return usage();
+    }
+
+    BeirImportReport report;
+    std::string error;
+    if (!import_beir(args[0], args[1], report, error)) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
+    }
+
+    std::cout << "lines " << report.lines_seen << "\n"
+              << "documents " << report.documents_written << "\n"
+              << "skipped " << report.skipped_empty << "\n";
+    return 0;
+}
+
+int cmd_evaluate(const std::vector<std::string>& args) {
+    std::vector<std::string> rest = args;
+    QueryOptions options;
+    if (!take_query_options(rest, options)) {
+        return 1;
+    }
+    if (rest.size() != 3) {
+        return usage();
+    }
+
+    const std::optional<InvertedIndex> opened = open_index(rest[0]);
+    if (!opened.has_value()) {
+        return 1;
+    }
+
+    RelevanceReport report;
+    std::string error;
+    if (!evaluate_relevance(*opened, rest[1], rest[2], options, report, error)) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
+    }
+
+    std::cout << "queries " << report.queries << "\n"
+              << "unjudged " << report.unjudged << "\n"
+              << "scorer " << (options.scorer == Scorer::Bm25 ? "bm25" : "tfidf") << "\n"
+              << std::fixed << std::setprecision(4)
+              << "ndcg_at_10 " << report.ndcg_at_10 << "\n"
+              << "precision_at_10 " << report.precision_at_10 << "\n"
+              << "recall_at_100 " << report.recall_at_100 << "\n";
+    return 0;
+}
+
+int cmd_index_build(const std::vector<std::string>& args) {
+    std::vector<std::string> rest = args;
+    std::size_t block = 50000;
+    std::size_t threads = 1;
+
+    while (!rest.empty() && rest.front().starts_with("--")) {
+        if (rest.size() < 2) {
+            return usage();
+        }
+        const std::string flag = rest[0];
+        const std::string value = rest[1];
+        if (flag == "--block") {
+            if (!parse_count(value, block) || block == 0) {
+                std::cerr << "search: block must be a positive integer: " << value << "\n";
+                return 1;
+            }
+        } else if (flag == "--threads") {
+            if (!parse_count(value, threads) || threads == 0) {
+                std::cerr << "search: threads must be a positive integer: " << value << "\n";
+                return 1;
+            }
+        } else {
+            std::cerr << "search: unknown option: " << flag << "\n";
+            return 1;
+        }
+        rest.erase(rest.begin(), rest.begin() + 2);
+    }
+
+    if (rest.size() != 2) {
+        return usage();
+    }
+
+    std::error_code ec;
+    if (!std::filesystem::is_directory(rest[0], ec) && !looks_like_corpus_file(rest[0])) {
+        return reject_missing_corpus(rest[0]);
+    }
+
+    ExternalBuildReport report;
+    std::string error;
+    if (!build_index_external(rest[0], rest[1], block, threads, report, error)) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
+    }
+
+    std::cout << "documents " << report.documents << "\n"
+              << "terms " << report.terms << "\n"
+              << "postings " << report.postings << "\n"
+              << "blocks " << report.blocks << "\n";
+    return 0;
+}
+
 int cmd_bench(const std::vector<std::string>& args) {
     std::vector<std::string> rest;
     bool stable_only = false;
     std::size_t threads = 1;
     std::size_t limit = 10;
     std::size_t repeats = 1;
+    bool snippets = false;
+    std::string snippet_corpus;
 
     for (std::size_t i = 0; i < args.size(); i++) {
         const std::string& argument = args[i];
@@ -569,9 +721,21 @@ int cmd_bench(const std::vector<std::string>& args) {
             stable_only = true;
             continue;
         }
+        if (argument == "--snippet") {
+            snippets = true;
+            continue;
+        }
 
         if (i + 1 >= args.size()) {
             return usage();
+        }
+
+        // The only flag here whose value is not a number: where snippet text
+        // comes from, when it is not beside the index.
+        if (argument == "--corpus") {
+            snippet_corpus = args[i + 1];
+            i++;
+            continue;
         }
 
         std::size_t value = 0;
@@ -662,8 +826,21 @@ int cmd_bench(const std::vector<std::string>& args) {
             return 1;
         }
 
+        QueryOptions snippet_options;
+        snippet_options.snippets = snippets;
+        snippet_options.corpus = snippet_corpus;
+        const std::unique_ptr<CorpusReader> corpus =
+            open_snippet_corpus(source.string(), snippet_options, snippets);
+        if (snippets && corpus == nullptr) {
+            std::cerr << "search: bench query --snippet found no corpus beside " << source.string()
+                      << "\n";
+            return 1;
+        }
+
         print_measurements(std::cout, bench_environment(source), stable_only);
-        print_measurements(std::cout, bench_query(*opened, queries, limit, repeats), stable_only);
+        print_measurements(std::cout,
+                           bench_query(*opened, corpus.get(), queries, limit, repeats, snippets),
+                           stable_only);
         return 0;
     }
 
@@ -688,7 +865,8 @@ int cmd_query(const std::vector<std::string>& args) {
 
     std::string error;
     const std::optional<std::vector<QueryResult>> results =
-        run_query(*opened, corpus_for_snippets(rest[0]), rest[1], options, error);
+        run_query(*opened, open_snippet_corpus(rest[0], options, options.snippets).get(), rest[1],
+                  options, error);
     if (!results.has_value()) {
         std::cerr << "search: " << error << "\n";
         return 1;
@@ -769,7 +947,9 @@ int cmd_repl(const std::vector<std::string>& args) {
         return 1;
     }
 
-    const std::optional<std::filesystem::path> corpus_dir = corpus_for_snippets(rest[0]);
+    // The REPL can turn snippets on later with :snippet, so the corpus is
+    // opened up front rather than at the first query that needs it.
+    const std::unique_ptr<CorpusReader> corpus = open_snippet_corpus(rest[0], options, true);
     const bool interactive = isatty(STDIN_FILENO) != 0;
 
     std::string line;
@@ -799,7 +979,7 @@ int cmd_repl(const std::vector<std::string>& args) {
 
         std::string error;
         const std::optional<std::vector<QueryResult>> results =
-            run_query(*opened, corpus_dir, line, options, error);
+            run_query(*opened, corpus.get(), line, options, error);
         if (!results.has_value()) {
             std::cout << "error: " << error << "\n";
             continue;
@@ -1814,6 +1994,15 @@ int main(int argc, char** argv) {
     }
     if (command == "index-write") {
         return cmd_index_write(rest);
+    }
+    if (command == "index-build") {
+        return cmd_index_build(rest);
+    }
+    if (command == "beir-import") {
+        return cmd_beir_import(rest);
+    }
+    if (command == "evaluate") {
+        return cmd_evaluate(rest);
     }
     if (command == "index-size") {
         return cmd_index_size(rest);

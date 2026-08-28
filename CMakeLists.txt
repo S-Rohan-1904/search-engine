@@ -56,6 +56,11 @@ add_executable(search
   src/results.cpp
   src/bench.cpp
   src/corpus_file.cpp
+  src/mapped_file.cpp
+  src/index_map.cpp
+  src/jsonl.cpp
+  src/beir.cpp
+  src/index_build.cpp
   src/wiki_import.cpp
 )
 

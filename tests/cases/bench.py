@@ -7,57 +7,57 @@ CASES = [
     {
         "name": "build reports the shape of the index it built",
         "argv": ["bench", "build", "--stable", "corpus/fixtures"],
-        "stdout": "source corpus/fixtures\nsource_bytes 4361\nthreads 1\ndocuments 30\nterms 235\npostings 343\nindex_bytes 3658",
+        "stdout": "source corpus/fixtures\nsource_bytes 4361\nthreads 1\ndocuments 30\nterms 235\npostings 343\nindex_bytes 5976",
     },
     {
         "name": "the tiny fixture",
         "argv": ["bench", "build", "--stable", "tests/fixtures/tiny"],
-        "stdout": "source tests/fixtures/tiny\nsource_bytes 199\nthreads 1\ndocuments 3\nterms 11\npostings 19\nindex_bytes 215",
+        "stdout": "source tests/fixtures/tiny\nsource_bytes 199\nthreads 1\ndocuments 3\nterms 11\npostings 19\nindex_bytes 403",
     },
     {
         "name": "an empty corpus measures as empty",
         "argv": ["bench", "build", "--stable", "tests/fixtures/empty"],
-        "stdout": "source tests/fixtures/empty\nsource_bytes 0\nthreads 1\ndocuments 0\nterms 0\npostings 0\nindex_bytes 11",
+        "stdout": "source tests/fixtures/empty\nsource_bytes 0\nthreads 1\ndocuments 0\nterms 0\npostings 0\nindex_bytes 73",
     },
     {
         "name": "thread count is reported back",
         "argv": ["bench", "build", "--stable", "--threads", "4", "corpus/fixtures"],
-        "stdout": "source corpus/fixtures\nsource_bytes 4361\nthreads 4\ndocuments 30\nterms 235\npostings 343\nindex_bytes 3658",
+        "stdout": "source corpus/fixtures\nsource_bytes 4361\nthreads 4\ndocuments 30\nterms 235\npostings 343\nindex_bytes 5976",
     },
     {
         "name": "more threads do not change what was built",
         "argv": ["bench", "build", "--stable", "--threads", "8", "corpus/fixtures"],
-        "stdout": "source corpus/fixtures\nsource_bytes 4361\nthreads 8\ndocuments 30\nterms 235\npostings 343\nindex_bytes 3658",
+        "stdout": "source corpus/fixtures\nsource_bytes 4361\nthreads 8\ndocuments 30\nterms 235\npostings 343\nindex_bytes 5976",
     },
     {
         "name": "query reports how many queries ran and what they returned",
         "argv": ["bench", "query", "--stable", "corpus/fixtures", "tests/fixtures/queries/basic.txt"],
-        "stdout": "source corpus/fixtures\nsource_bytes 4361\ndocuments 30\nqueries 30\nrepeats 1\nlimit 10\nresults_returned 67\nqueries_rejected 0",
+        "stdout": "source corpus/fixtures\nsource_bytes 4361\ndocuments 30\nqueries 30\nrepeats 1\nlimit 10\nsnippets off\nresults_returned 67\nqueries_rejected 0",
     },
     {
         "name": "repeats do not change the results counted",
         "argv": ["bench", "query", "--stable", "--repeats", "5", "corpus/fixtures", "tests/fixtures/queries/basic.txt"],
-        "stdout": "source corpus/fixtures\nsource_bytes 4361\ndocuments 30\nqueries 30\nrepeats 5\nlimit 10\nresults_returned 67\nqueries_rejected 0",
+        "stdout": "source corpus/fixtures\nsource_bytes 4361\ndocuments 30\nqueries 30\nrepeats 5\nlimit 10\nsnippets off\nresults_returned 67\nqueries_rejected 0",
     },
     {
         "name": "the result limit is reported and applied",
         "argv": ["bench", "query", "--stable", "--limit", "3", "corpus/fixtures", "tests/fixtures/queries/basic.txt"],
-        "stdout": "source corpus/fixtures\nsource_bytes 4361\ndocuments 30\nqueries 30\nrepeats 1\nlimit 3\nresults_returned 46\nqueries_rejected 0",
+        "stdout": "source corpus/fixtures\nsource_bytes 4361\ndocuments 30\nqueries 30\nrepeats 1\nlimit 3\nsnippets off\nresults_returned 46\nqueries_rejected 0",
     },
     {
         "name": "a limit of zero returns nothing",
         "argv": ["bench", "query", "--stable", "--limit", "0", "corpus/fixtures", "tests/fixtures/queries/basic.txt"],
-        "stdout": "source corpus/fixtures\nsource_bytes 4361\ndocuments 30\nqueries 30\nrepeats 1\nlimit 0\nresults_returned 0\nqueries_rejected 0",
+        "stdout": "source corpus/fixtures\nsource_bytes 4361\ndocuments 30\nqueries 30\nrepeats 1\nlimit 0\nsnippets off\nresults_returned 0\nqueries_rejected 0",
     },
     {
         "name": "querying the tiny fixture",
         "argv": ["bench", "query", "--stable", "tests/fixtures/tiny", "tests/fixtures/queries/basic.txt"],
-        "stdout": "source tests/fixtures/tiny\nsource_bytes 199\ndocuments 3\nqueries 30\nrepeats 1\nlimit 10\nresults_returned 13\nqueries_rejected 0",
+        "stdout": "source tests/fixtures/tiny\nsource_bytes 199\ndocuments 3\nqueries 30\nrepeats 1\nlimit 10\nsnippets off\nresults_returned 13\nqueries_rejected 0",
     },
     {
         "name": "a saved index can be queried",
         "argv": ["bench", "query", "--stable", "tests/fixtures/index/good.bin", "tests/fixtures/queries/basic.txt"],
-        "stdout": "source tests/fixtures/index/good.bin\nsource_bytes 215\ndocuments 3\nqueries 30\nrepeats 1\nlimit 10\nresults_returned 13\nqueries_rejected 0",
+        "stdout": "source tests/fixtures/index/good.bin\nsource_bytes 215\ndocuments 3\nqueries 30\nrepeats 1\nlimit 10\nsnippets off\nresults_returned 13\nqueries_rejected 0",
     },
     {
         # A corpus file used to fall through to the index loader, which failed
@@ -65,7 +65,7 @@ CASES = [
         # results, microsecond latencies that looked like a very fast engine.
         "name": "a corpus file is indexed rather than benchmarked empty",
         "argv": ["bench", "query", "--stable", "tests/fixtures/corpusfile/tiny.corpus", "tests/fixtures/queries/basic.txt"],
-        "stdout": "source tests/fixtures/corpusfile/tiny.corpus\nsource_bytes 297\ndocuments 3\nqueries 30\nrepeats 1\nlimit 10\nresults_returned 13\nqueries_rejected 0",
+        "stdout": "source tests/fixtures/corpusfile/tiny.corpus\nsource_bytes 297\ndocuments 3\nqueries 30\nrepeats 1\nlimit 10\nsnippets off\nresults_returned 13\nqueries_rejected 0",
     },
     {
         "name": "a source that yields no index is rejected rather than benchmarked",
@@ -76,7 +76,7 @@ CASES = [
     {
         "name": "flags may come before or after the subcommand",
         "argv": ["bench", "--stable", "query", "corpus/fixtures", "tests/fixtures/queries/basic.txt"],
-        "stdout": "source corpus/fixtures\nsource_bytes 4361\ndocuments 30\nqueries 30\nrepeats 1\nlimit 10\nresults_returned 67\nqueries_rejected 0",
+        "stdout": "source corpus/fixtures\nsource_bytes 4361\ndocuments 30\nqueries 30\nrepeats 1\nlimit 10\nsnippets off\nresults_returned 67\nqueries_rejected 0",
     },
     {
         "name": "an unknown benchmark is rejected",

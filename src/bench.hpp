@@ -51,9 +51,9 @@ std::vector<Measurement> bench_build(const std::filesystem::path& source, std::s
 // Reports the query count, total results returned, throughput, and the p50, p95
 // and p99 latencies. Percentiles rather than a mean: a mean hides the tail, and
 // the tail is what a user notices.
-std::vector<Measurement> bench_query(const InvertedIndex& index,
-                                     const std::vector<std::string>& queries,
-                                     std::size_t limit, std::size_t repeats);
+std::vector<Measurement> bench_query(const InvertedIndex& index, const CorpusReader* corpus,
+                                     const std::vector<std::string>& queries, std::size_t limit,
+                                     std::size_t repeats, bool snippets);
 
 // Writes measurements as `name value` lines.
 //

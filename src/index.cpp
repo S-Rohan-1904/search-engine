@@ -12,8 +12,23 @@
 
 #include "analyzer.hpp"
 #include "corpus.hpp"
+#include "index_map.hpp"
 #include "document.hpp"
 #include "thread_pool.hpp"
+
+struct InvertedIndex::Backing {
+    explicit Backing(MappedIndex index) : mapped(std::move(index)) {}
+
+    MappedIndex mapped;
+    std::mutex mutex;
+    std::unordered_map<std::string, std::vector<Posting>> decoded;
+};
+
+InvertedIndex InvertedIndex::from_mapped(MappedIndex mapped) {
+    InvertedIndex index;
+    index.mapped_ = std::make_shared<Backing>(std::move(mapped));
+    return index;
+}
 
 void InvertedIndex::add_document(std::string doc_id, const std::vector<Token>& terms,
                                  std::uint64_t fingerprint) {
@@ -35,14 +50,18 @@ void InvertedIndex::add_document(std::string doc_id, const std::vector<Token>& t
 }
 
 std::size_t InvertedIndex::document_count() const {
-    return document_ids_.size();
+    return mapped_ ? mapped_->mapped.document_count() : document_ids_.size();
 }
 
 std::size_t InvertedIndex::term_count() const {
-    return postings_.size();
+    return mapped_ ? mapped_->mapped.term_count() : postings_.size();
 }
 
 std::size_t InvertedIndex::posting_count() const {
+    if (mapped_) {
+        return mapped_->mapped.posting_count();
+    }
+
     std::size_t total = 0;
     for (const auto& [term, postings] : postings_) {
         total += postings.size();
@@ -57,15 +76,37 @@ std::size_t InvertedIndex::document_frequency(std::string_view term) const {
 const std::vector<Posting>& InvertedIndex::postings(std::string_view term) const {
     static const std::vector<Posting> kEmpty;
 
+    if (mapped_) {
+        const std::lock_guard<std::mutex> guard(mapped_->mutex);
+        const auto cached = mapped_->decoded.find(std::string(term));
+        if (cached != mapped_->decoded.end()) {
+            return cached->second;
+        }
+        return mapped_->decoded.emplace(std::string(term), mapped_->mapped.postings(term))
+            .first->second;
+    }
+
     const auto it = postings_.find(std::string(term));
     return it == postings_.end() ? kEmpty : it->second;
 }
 
 std::size_t InvertedIndex::document_length(std::size_t doc_id) const {
+    if (mapped_) {
+        return mapped_->mapped.document_length(doc_id);
+    }
     return doc_id < document_lengths_.size() ? document_lengths_[doc_id] : 0;
 }
 
 double InvertedIndex::average_document_length() const {
+    if (mapped_) {
+        const std::size_t documents = mapped_->mapped.document_count();
+        if (documents == 0) {
+            return 0.0;
+        }
+        return static_cast<double>(mapped_->mapped.total_document_length()) /
+               static_cast<double>(documents);
+    }
+
     if (document_lengths_.empty()) {
         return 0.0;
     }
@@ -75,6 +116,9 @@ double InvertedIndex::average_document_length() const {
 }
 
 std::uint64_t InvertedIndex::document_fingerprint(std::size_t doc_id) const {
+    if (mapped_) {
+        return mapped_->mapped.document_fingerprint(doc_id);
+    }
     return doc_id < document_fingerprints_.size() ? document_fingerprints_[doc_id] : 0;
 }
 
@@ -88,6 +132,10 @@ std::optional<std::size_t> InvertedIndex::find_document(std::string_view doc_id)
 }
 
 std::vector<Token> InvertedIndex::document_terms(std::size_t doc_id) const {
+    if (mapped_) {
+        return mapped_->mapped.document_terms(doc_id);
+    }
+
     std::vector<Token> out;
 
     for (const auto& [term, postings] : postings_) {
@@ -108,10 +156,29 @@ std::vector<Token> InvertedIndex::document_terms(std::size_t doc_id) const {
 }
 
 const std::vector<std::string>& InvertedIndex::document_ids() const {
+    // The mapped file stores ids as bytes, and a caller that wants the whole
+    // list wants them as strings. Building that list is the one thing here
+    // that is proportional to the corpus, so it happens on demand rather than
+    // at open time: a query prints ten ids and never asks for the rest.
+    if (mapped_ && document_ids_.size() != mapped_->mapped.document_count()) {
+        const std::lock_guard<std::mutex> guard(mapped_->mutex);
+        if (document_ids_.size() != mapped_->mapped.document_count()) {
+            const std::size_t documents = mapped_->mapped.document_count();
+            document_ids_.clear();
+            document_ids_.reserve(documents);
+            for (std::size_t doc_id = 0; doc_id < documents; doc_id++) {
+                document_ids_.emplace_back(mapped_->mapped.document_id(doc_id));
+            }
+        }
+    }
     return document_ids_;
 }
 
 std::vector<std::string> InvertedIndex::terms() const {
+    if (mapped_) {
+        return mapped_->mapped.terms();
+    }
+
     std::vector<std::string> out;
     out.reserve(postings_.size());
     for (const auto& [term, postings] : postings_) {

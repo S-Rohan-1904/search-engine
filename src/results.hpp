@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "corpus.hpp"
 #include "index.hpp"
 #include "ranking.hpp"
 
@@ -18,6 +19,11 @@ struct QueryOptions {
     bool snippets = false;
     std::size_t snippet_chars = 160;
     bool tsv = false;
+
+    // Where snippets are cut from, when it is not the source being queried.
+    // An index file holds no document text, so querying one needs to be told,
+    // or to find the corpus beside it.
+    std::string corpus;
 };
 
 // One result, ready to print.
@@ -35,14 +41,14 @@ struct QueryResult {
 // therefore scores zero; those sort last rather than being dropped, since they
 // are legitimate matches.
 //
-// `corpus_dir` is needed only for snippets, which are cut from the document
+// `corpus` is needed only for snippets, which are cut from the document
 // text the index does not store. Without it the results still come back, with
 // their snippets empty.
 //
 // Returns nullopt with `error` set when the query does not parse.
 std::optional<std::vector<QueryResult>> run_query(
-    const InvertedIndex& index, const std::optional<std::filesystem::path>& corpus_dir,
-    std::string_view query, const QueryOptions& options, std::string& error);
+    const InvertedIndex& index, const CorpusReader* corpus, std::string_view query,
+    const QueryOptions& options, std::string& error);
 
 // Writes results in the chosen format.
 //

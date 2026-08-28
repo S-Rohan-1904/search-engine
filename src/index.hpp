@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <filesystem>
 #include <string>
@@ -11,6 +13,8 @@
 
 #include "corpus.hpp"
 #include "tokenizer.hpp"
+
+class MappedIndex;
 
 // One entry in a term's postings list.
 //
@@ -111,6 +115,13 @@ public:
     // every postings list ascending by doc_id and free of repeats, every
     // doc_id within range, and one length per document. The loader checks all
     // of that before calling this.
+    // An index that reads from a mapped file instead of owning its postings.
+    //
+    // Nothing is decoded up front. A postings list is decoded the first time a
+    // query asks for its term and kept after that, so repeated queries in one
+    // REPL session pay for a term once.
+    static InvertedIndex from_mapped(MappedIndex mapped);
+
     static InvertedIndex from_parts(
         std::vector<std::string> document_ids,
         std::vector<std::size_t> document_lengths,
@@ -118,7 +129,15 @@ public:
         std::unordered_map<std::string, std::vector<Posting>> postings);
 
 private:
-    std::vector<std::string> document_ids_;
+    // The mapped file, the terms decoded from it so far, and the lock that
+    // guards them. Scoring runs on several threads and every one of them may
+    // ask for a term that is not decoded yet. References into an
+    // unordered_map stay valid when it grows, so only the insert needs the
+    // lock, not the use of what it returns.
+    struct Backing;
+    std::shared_ptr<Backing> mapped_;
+
+    mutable std::vector<std::string> document_ids_;
     std::vector<std::size_t> document_lengths_;
     std::vector<std::uint64_t> document_fingerprints_;
     std::unordered_map<std::string, std::vector<Posting>> postings_;

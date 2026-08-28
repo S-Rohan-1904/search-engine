@@ -138,11 +138,12 @@ std::vector<Measurement> bench_build(const std::filesystem::path& source, std::s
     return out;
 }
 
-std::vector<Measurement> bench_query(const InvertedIndex& index,
+std::vector<Measurement> bench_query(const InvertedIndex& index, const CorpusReader* corpus,
                                      const std::vector<std::string>& queries, std::size_t limit,
-                                     std::size_t repeats) {
+                                     std::size_t repeats, bool snippets) {
     QueryOptions options;
     options.limit = limit;
+    options.snippets = snippets;
 
     std::vector<double> samples;
     samples.reserve(queries.size() * repeats);
@@ -154,7 +155,7 @@ std::vector<Measurement> bench_query(const InvertedIndex& index,
             const auto start = std::chrono::steady_clock::now();
             std::string error;
             const std::optional<std::vector<QueryResult>> results =
-                run_query(index, std::nullopt, query, options, error);
+                run_query(index, corpus, query, options, error);
             const auto end = std::chrono::steady_clock::now();
 
             samples.push_back(elapsed_ms(start, end));
@@ -178,6 +179,7 @@ std::vector<Measurement> bench_query(const InvertedIndex& index,
         Measurement{"queries", std::to_string(queries.size()), true},
         Measurement{"repeats", std::to_string(repeats), true},
         Measurement{"limit", std::to_string(limit), true},
+        Measurement{"snippets", snippets ? "on" : "off", true},
         Measurement{"results_returned", std::to_string(results_total), true},
         Measurement{"queries_rejected", std::to_string(failed), true},
     };

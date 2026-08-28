@@ -12,8 +12,8 @@
 #include "snippet.hpp"
 
 std::optional<std::vector<QueryResult>> run_query(
-    const InvertedIndex& index, const std::optional<std::filesystem::path>& corpus_dir,
-    std::string_view query, const QueryOptions& options, std::string& error) {
+    const InvertedIndex& index, const CorpusReader* corpus, std::string_view query,
+    const QueryOptions& options, std::string& error) {
     error.clear();
 
     const ParseResult parsed = parse_query(query);
@@ -61,8 +61,8 @@ std::optional<std::vector<QueryResult>> run_query(
     for (const ScoredDocument& document : best) {
         QueryResult result{ids[document.doc_id], document.score, ""};
 
-        if (options.snippets && corpus_dir.has_value()) {
-            const std::optional<Document> doc = read_document(*corpus_dir, result.document_id);
+        if (options.snippets && corpus != nullptr) {
+            const std::optional<Document> doc = corpus->read(result.document_id);
             if (doc.has_value()) {
                 SnippetOptions snippet_options;
                 snippet_options.max_chars = options.snippet_chars;
