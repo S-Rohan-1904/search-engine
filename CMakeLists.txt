@@ -53,6 +53,7 @@ add_executable(search
   src/suggest.cpp
   src/complete.cpp
   src/pagerank.cpp
+  src/results.cpp
 )
 
 target_include_directories(search PRIVATE src)

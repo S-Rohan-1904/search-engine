@@ -1,9 +1,11 @@
 #include <filesystem>
+#include <unistd.h>
 #include <iomanip>
 #include <iostream>
 #include <chrono>
 #include <fstream>
 #include <iterator>
+#include <sstream>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -28,6 +30,7 @@
 #include "snippet.hpp"
 #include "suggest.hpp"
 #include "ranking.hpp"
+#include "results.hpp"
 #include "thread_pool.hpp"
 #include "url.hpp"
 #include "thread_pool.hpp"
@@ -68,6 +71,14 @@ int usage() {
                  "                               documents containing the first but not the second\n"
                  "  phrase <corpus_dir> <text>   documents containing the words consecutively\n"
                  "  match <corpus_dir> <query>   documents matching a boolean query\n"
+                 "  query [options] <source> <query>\n"
+                 "                               ranked results for a boolean query\n"
+                 "      --limit <n>              how many results (default 10)\n"
+                 "      --scorer bm25|tfidf      which ranking function\n"
+                 "      --snippet                show an excerpt under each result\n"
+                 "      --max-chars <n>          how long an excerpt may be\n"
+                 "      --tsv                    id and score, tab separated\n"
+                 "  repl [options] <source>      read queries until end of input\n"
                  "  lengths <corpus_dir>         indexed length of each document\n"
                  "  tfidf [--threads <n>] <source> <word>...\n"
                  "                               rank documents by TF-IDF\n"
@@ -377,6 +388,204 @@ bool read_text_file(const std::filesystem::path& path, std::string& out) {
     }
     out.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     return true;
+}
+
+bool take_query_options(std::vector<std::string>& args, QueryOptions& options) {
+    while (!args.empty() && args.front().starts_with("--")) {
+        const std::string flag = args.front();
+
+        if (flag == "--snippet") {
+            options.snippets = true;
+            args.erase(args.begin());
+            continue;
+        }
+        if (flag == "--tsv") {
+            options.tsv = true;
+            args.erase(args.begin());
+            continue;
+        }
+
+        if (args.size() < 2) {
+            return false;
+        }
+        const std::string value = args[1];
+
+        if (flag == "--limit") {
+            if (!parse_count(value, options.limit)) {
+                std::cerr << "search: limit must be a non-negative integer: " << value << "\n";
+                return false;
+            }
+        } else if (flag == "--max-chars") {
+            if (!parse_count(value, options.snippet_chars) || options.snippet_chars == 0) {
+                std::cerr << "search: max-chars must be a positive integer: " << value << "\n";
+                return false;
+            }
+        } else if (flag == "--scorer") {
+            if (value == "bm25") {
+                options.scorer = Scorer::Bm25;
+            } else if (value == "tfidf") {
+                options.scorer = Scorer::TfIdf;
+            } else {
+                std::cerr << "search: unknown scorer: " << value << "\n";
+                return false;
+            }
+        } else {
+            std::cerr << "search: unknown option: " << flag << "\n";
+            return false;
+        }
+
+        args.erase(args.begin(), args.begin() + 2);
+    }
+
+    return true;
+}
+
+std::optional<std::filesystem::path> corpus_for_snippets(const std::string& source) {
+    std::error_code ec;
+    if (std::filesystem::is_directory(source, ec)) {
+        return std::filesystem::path(source);
+    }
+    return std::nullopt;
+}
+
+int cmd_query(const std::vector<std::string>& args) {
+    std::vector<std::string> rest = args;
+    QueryOptions options;
+    if (!take_query_options(rest, options)) {
+        return 1;
+    }
+    if (rest.size() != 2) {
+        return usage();
+    }
+
+    const std::optional<InvertedIndex> opened = open_index(rest[0]);
+    if (!opened.has_value()) {
+        return 1;
+    }
+
+    std::string error;
+    const std::optional<std::vector<QueryResult>> results =
+        run_query(*opened, corpus_for_snippets(rest[0]), rest[1], options, error);
+    if (!results.has_value()) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
+    }
+
+    print_results(std::cout, *results, options);
+    return 0;
+}
+
+int repl_meta_command(const std::string& line, QueryOptions& options, bool& quit) {
+    std::istringstream words(line);
+    std::string name;
+    std::string value;
+    words >> name >> value;
+
+    if (name == ":quit" || name == ":q") {
+        quit = true;
+        return 0;
+    }
+    if (name == ":help") {
+        std::cout << "queries use AND, OR, NOT, parentheses and \"phrases\"\n"
+                     ":limit <n>      how many results to show\n"
+                     ":scorer <name>  bm25 or tfidf\n"
+                     ":snippet <on|off>\n"
+                     ":settings       show the current settings\n"
+                     ":quit\n";
+        return 0;
+    }
+    if (name == ":settings") {
+        std::cout << "limit " << options.limit << "\n"
+                  << "scorer " << (options.scorer == Scorer::Bm25 ? "bm25" : "tfidf") << "\n"
+                  << "snippet " << (options.snippets ? "on" : "off") << "\n";
+        return 0;
+    }
+    if (name == ":limit") {
+        if (!parse_count(value, options.limit)) {
+            std::cout << "limit must be a non-negative integer\n";
+        }
+        return 0;
+    }
+    if (name == ":scorer") {
+        if (value == "bm25") {
+            options.scorer = Scorer::Bm25;
+        } else if (value == "tfidf") {
+            options.scorer = Scorer::TfIdf;
+        } else {
+            std::cout << "scorer must be bm25 or tfidf\n";
+        }
+        return 0;
+    }
+    if (name == ":snippet") {
+        if (value == "on") {
+            options.snippets = true;
+        } else if (value == "off") {
+            options.snippets = false;
+        } else {
+            std::cout << "snippet must be on or off\n";
+        }
+        return 0;
+    }
+
+    std::cout << "unknown command: " << name << "\n";
+    return 0;
+}
+
+int cmd_repl(const std::vector<std::string>& args) {
+    std::vector<std::string> rest = args;
+    QueryOptions options;
+    if (!take_query_options(rest, options)) {
+        return 1;
+    }
+    if (rest.size() != 1) {
+        return usage();
+    }
+
+    const std::optional<InvertedIndex> opened = open_index(rest[0]);
+    if (!opened.has_value()) {
+        return 1;
+    }
+
+    const std::optional<std::filesystem::path> corpus_dir = corpus_for_snippets(rest[0]);
+    const bool interactive = isatty(STDIN_FILENO) != 0;
+
+    std::string line;
+    while (true) {
+        if (interactive) {
+            std::cout << "> " << std::flush;
+        }
+        if (!std::getline(std::cin, line)) {
+            break;
+        }
+
+        std::size_t begin = line.find_first_not_of(" \t");
+        if (begin == std::string::npos) {
+            continue;
+        }
+        const std::size_t end = line.find_last_not_of(" \t");
+        line = line.substr(begin, end - begin + 1);
+
+        if (line.front() == ':') {
+            bool quit = false;
+            repl_meta_command(line, options, quit);
+            if (quit) {
+                break;
+            }
+            continue;
+        }
+
+        std::string error;
+        const std::optional<std::vector<QueryResult>> results =
+            run_query(*opened, corpus_dir, line, options, error);
+        if (!results.has_value()) {
+            std::cout << "error: " << error << "\n";
+            continue;
+        }
+
+        print_results(std::cout, *results, options);
+    }
+
+    return 0;
 }
 
 int cmd_index_update(const std::vector<std::string>& args) {
@@ -1320,6 +1529,12 @@ int main(int argc, char** argv) {
     }
     if (command == "lengths") {
         return cmd_lengths(rest);
+    }
+    if (command == "query") {
+        return cmd_query(rest);
+    }
+    if (command == "repl") {
+        return cmd_repl(rest);
     }
     if (command == "index-update") {
         return cmd_index_update(rest);

@@ -25,6 +25,29 @@ index file. The engine builds or loads whichever it is given.
 ### Searching
 
 ```console
+$ ./build/search query --limit 2 --snippet --max-chars 90 corpus/fixtures "cat AND mat"
+1. doc_001  7.4906
+   [Cats] and [Mats] The [cat] sat on the [mat]. The [cat] was happy on that [mat]. A [mat] is a flat rug...
+
+$ ./build/search repl --limit 2 corpus/fixtures
+> cat OR oven
+1. doc_018  2.9186
+2. doc_003  2.5076
+> :limit 1
+> "cat sat"
+1. doc_001  5.3844
+> :quit
+```
+
+`query` is the whole engine in one command: the boolean expression decides which
+documents qualify, BM25 decides what order they come in, and `--snippet` shows
+why. `--tsv` prints id and score for piping. `repl` loads the index once and
+answers until end of input, with `:limit`, `:scorer` and `:snippet` adjustable
+mid-session.
+
+The pieces are also exposed on their own:
+
+```console
 $ ./build/search match corpus/fixtures 'cat AND NOT (mat OR sat)'
 doc_002
 doc_003
