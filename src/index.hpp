@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "corpus.hpp"
 #include "tokenizer.hpp"
 
 // One entry in a term's postings list.
@@ -121,13 +122,18 @@ private:
     std::vector<std::size_t> document_lengths_;
     std::vector<std::uint64_t> document_fingerprints_;
     std::unordered_map<std::string, std::vector<Posting>> postings_;
+
+    // Sum of document_lengths_, kept current by every method that adds
+    // documents. BM25 asks for the mean once per posting it scores, so
+    // re-summing the lengths there would make scoring one query cost
+    // O(postings * documents).
+    std::size_t total_document_length_ = 0;
 };
 
 // Builds an index over the named documents, in the order given. Documents that
 // fail to parse are skipped, so a document's ordinal is its position among the
 // ones that parsed, not among the ids passed in.
-InvertedIndex build_index_from(const std::filesystem::path& corpus_dir,
-                               const std::vector<std::string>& ids);
+InvertedIndex build_index_from(const CorpusReader& corpus, const std::vector<std::string>& ids);
 
 // Builds an index over every document in corpus_dir, in the sorted id order
 // that list_document_ids returns.
@@ -156,9 +162,16 @@ struct IndexUpdateReport {
 InvertedIndex update_index(const InvertedIndex& previous,
                            const std::filesystem::path& corpus_dir, IndexUpdateReport& report);
 
-// The fingerprint of a document file, or 0 if it cannot be read.
-std::uint64_t fingerprint_document(const std::filesystem::path& corpus_dir,
-                                   const std::string& id);
+// Where the time went during a parallel build.
+//
+// Only the middle phase is parallel. Reading the corpus into memory and merging
+// the per-slice indexes are both serial, so these three numbers are what bounds
+// the speedup, and reporting them keeps that bound honest rather than inferred.
+struct BuildProfile {
+    double open_ms = 0.0;   // opening the corpus and reading its id table
+    double index_ms = 0.0;  // the parallel slices, wall clock
+    double merge_ms = 0.0;  // folding the slice indexes into one
+};
 
 // The same index, built on several threads.
 //
@@ -168,3 +181,7 @@ std::uint64_t fingerprint_document(const std::filesystem::path& corpus_dir,
 // document ordinals and therefore the encoded bytes.
 InvertedIndex build_index_parallel(const std::filesystem::path& corpus_dir,
                                    std::size_t threads);
+
+// The same build, reporting where its time went.
+InvertedIndex build_index_parallel(const std::filesystem::path& corpus_dir, std::size_t threads,
+                                   BuildProfile& profile);

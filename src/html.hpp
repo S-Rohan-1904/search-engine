@@ -24,3 +24,9 @@ struct HtmlPage {
 // Character references for the five XML entities, &nbsp;, and numeric
 // references are decoded; everything else is left alone.
 HtmlPage parse_html(std::string_view html);
+
+// Decodes HTML character references: the five XML entities, &nbsp;, and numeric
+// references, which are written out as UTF-8. Anything unrecognised is left
+// exactly as written, since a visible &mdash; in the output gets noticed and
+// fixed while silently deleted text does not.
+std::string decode_html_entities(std::string_view text);

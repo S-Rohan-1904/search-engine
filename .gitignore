@@ -7,3 +7,9 @@ __pycache__/
 index.bin
 *.idx
 MY_NOTES.md
+*.corpus
+!tests/fixtures/corpusfile/*.corpus
+corpus/wikipedia/
+corpus/beir/
+*.xml.gz
+*.json.gz

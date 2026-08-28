@@ -55,9 +55,64 @@ CASES = [
         "stdout": "usa",
     },
     {
-        "name": "keeps non-ASCII bytes verbatim while folding the ASCII around them",
+        "name": "an accented letter folds to its ASCII base, so Café and cafe agree",
         "argv": ["normalize", "Café,"],
-        "stdout": "café",
+        "stdout": "cafe",
+    },
+    {
+        "name": "the unaccented spelling gives the same term",
+        "argv": ["normalize", "cafe"],
+        "stdout": "cafe",
+    },
+    {
+        "name": "folding happens after case folding, so uppercase accents work",
+        "argv": ["normalize", "CAFÉ"],
+        "stdout": "cafe",
+    },
+    {
+        "name": "a ligature expands to two letters",
+        "argv": ["normalize", "Œuvre"],
+        "stdout": "oeuvre",
+    },
+    {
+        "name": "the sharp s expands to ss",
+        "argv": ["normalize", "Straße"],
+        "stdout": "strasse",
+    },
+    {
+        "name": "Latin Extended-A folds too",
+        "argv": ["normalize", "Đorđević"],
+        "stdout": "dordevic",
+    },
+    {
+        "name": "a stroked o folds to o",
+        "argv": ["normalize", "Søren"],
+        "stdout": "soren",
+    },
+    {
+        "name": "a word with several accents",
+        "argv": ["normalize", "Ångström"],
+        "stdout": "angstrom",
+    },
+    {
+        "name": "scripts outside the folded range are kept verbatim",
+        "argv": ["normalize", "北京"],
+        "stdout": "北京",
+    },
+    {
+        "name": "as are other non-Latin characters",
+        "argv": ["normalize", "日本語"],
+        "stdout": "日本語",
+    },
+    {
+        "name": "a Roman numeral is left alone",
+        "argv": ["normalize", "Ⅻ"],
+        "stdout": "Ⅻ",
+    },
+    {
+        "name": "an invalid UTF-8 byte is kept rather than dropped",
+        "argv": ["normalize", "aÿb"],
+        "stdout": "ayb",
     },
     {
         "name": "drops a token made only of punctuation",

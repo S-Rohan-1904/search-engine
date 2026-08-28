@@ -178,6 +178,10 @@ bool is_block_tag(std::string_view name) {
 
 }
 
+std::string decode_html_entities(std::string_view text) {
+    return decode_entities(text);
+}
+
 HtmlPage parse_html(std::string_view html) {
     HtmlPage page;
     std::string raw_text;

@@ -1,0 +1,2 @@
+{ "index" : { "_type" : "_doc" , "_id" : "1" } }
+{ "opening_text" : "Short." , "title" : "Spaced Record" , "text" : "A record written with spaces around its colons and commas." }

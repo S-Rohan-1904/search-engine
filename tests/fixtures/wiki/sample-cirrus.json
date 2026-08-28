@@ -1,0 +1,12 @@
+{"index":{"_type":"_doc","_id":"1"}}
+{"template":["Template:Infobox"],"content_model":"wikitext","opening_text":"The cat is a small furry animal.","wiki":"simplewiki","language":"en","title":"Cat","text":"The cat is a small furry animal. Cats are often kept as pets and they hunt mice.","category":["Mammals"]}
+{"index":{"_type":"_doc","_id":"2"}}
+{"content_model":"wikitext","opening_text":"The dog is a domesticated animal.","wiki":"simplewiki","language":"en","title":"Dog","text":"The dog is a domesticated animal. It is often called man's best friend, and it \"barks\".","auxiliary_text":["See also"]}
+{"index":{"_type":"_doc","_id":"3"}}
+{"content_model":"wikitext","opening_text":"","wiki":"simplewiki","language":"en","title":"Empty Article","text":"","category":[]}
+{"index":{"_type":"_doc","_id":"4"}}
+{"content_model":"wikitext","opening_text":"A caf\u00e9 sells coffee.","wiki":"simplewiki","language":"en","title":"Caf\u00e9","text":"A caf\u00e9 is a place that sells coffee and light meals. The word comes from French.","category":["Food"]}
+{"index":{"_type":"_doc","_id":"5"}}
+{"content_model":"wikitext","opening_text":"The Sun is a star.","wiki":"simplewiki","language":"en","title":"Sun","text":"The Sun is the star at the centre of the Solar System.\nIt gives light and heat to the planets.\tIt is mostly hydrogen.","category":["Astronomy"]}
+{"index":{"_type":"_doc","_id":"6"}}
+{"content_model":"wikitext","opening_text":"An emoji test.","wiki":"simplewiki","language":"en","title":"Emoji \ud83d\ude00","text":"A surrogate pair encodes an emoji \ud83d\ude00 outside the basic plane. Path C:\\\\Windows and a slash \/ too.","category":[]}

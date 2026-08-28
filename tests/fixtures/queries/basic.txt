@@ -1,0 +1,30 @@
+cat
+dog
+mat
+sun
+star
+planet
+oven
+bread
+merge sort
+array
+cat AND mat
+cat AND dog
+cat OR dog
+cat AND NOT dog
+dog AND NOT cat
+(cat OR dog) AND mat
+cat AND (mat OR sat)
+NOT cat
+"cat sat"
+"sat on the mat"
+"solar system"
+"merge sort"
+the cat
+running dogs
+black cat
+hot oven
+sorting algorithms
+light and heat
+food and water
+elephant

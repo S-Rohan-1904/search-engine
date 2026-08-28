@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <filesystem>
 #include <unistd.h>
 #include <iomanip>
@@ -13,8 +14,10 @@
 #include <vector>
 
 #include "analyzer.hpp"
+#include "bench.hpp"
 #include "complete.hpp"
 #include "corpus.hpp"
+#include "corpus_file.hpp"
 #include "crawler.hpp"
 #include "document.hpp"
 #include "edit_distance.hpp"
@@ -33,6 +36,7 @@
 #include "results.hpp"
 #include "thread_pool.hpp"
 #include "url.hpp"
+#include "wiki_import.hpp"
 #include "thread_pool.hpp"
 #include "stemmer.hpp"
 #include "stopwords.hpp"
@@ -79,6 +83,13 @@ int usage() {
                  "      --max-chars <n>          how long an excerpt may be\n"
                  "      --tsv                    id and score, tab separated\n"
                  "  repl [options] <source>      read queries until end of input\n"
+                 "  bench build <source>         measure index construction\n"
+                 "  bench query <source> <query_file>\n"
+                 "                               measure query latency over a query log\n"
+                 "      --stable                 print only run-to-run stable figures\n"
+                 "      --threads <n>            build threads (bench build)\n"
+                 "      --limit <n>              results per query (bench query)\n"
+                 "      --repeats <n>            times to run each query\n"
                  "  lengths <corpus_dir>         indexed length of each document\n"
                  "  tfidf [--threads <n>] <source> <word>...\n"
                  "                               rank documents by TF-IDF\n"
@@ -90,6 +101,10 @@ int usage() {
                  "                               save an index to disk\n"
                  "  index-update [--encoding <name>] <corpus_dir> <file>\n"
                  "                               re-index only what changed\n"
+                 "  wiki-import [--limit <n>] [--abstracts] <dump.json|-> <file>\n"
+                 "                               build a corpus from a Wikipedia CirrusSearch dump\n"
+                 "  corpus-write <corpus_dir> <file>\n"
+                 "                               pack a corpus directory into one file\n"
                  "  index-size <source>          encoded size under each encoding\n"
                  "  pool-sum <threads> <n>       sum of squares below n, on a thread pool\n"
                  "  snippet [--max-chars <n>] <corpus_dir> <doc_id> <word>...\n"
@@ -153,6 +168,13 @@ bool take_threads(std::vector<std::string>& args, std::size_t& threads) {
     return true;
 }
 
+bool looks_like_corpus_file(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    char magic[4] = {};
+    return static_cast<bool>(in.read(magic, 4)) && magic[0] == 'S' && magic[1] == 'C' &&
+           magic[2] == 'P' && magic[3] == 'S';
+}
+
 std::optional<InvertedIndex> open_index(const std::filesystem::path& source,
                                         std::size_t threads = 1) {
     std::error_code ec;
@@ -161,6 +183,10 @@ std::optional<InvertedIndex> open_index(const std::filesystem::path& source,
     }
 
     if (std::filesystem::is_regular_file(source, ec)) {
+        if (looks_like_corpus_file(source)) {
+            return build_index_parallel(source, threads);
+        }
+
         std::string error;
         std::optional<InvertedIndex> index = read_index_file(source, error);
         if (!index.has_value()) {
@@ -178,13 +204,14 @@ int cmd_docs(const std::vector<std::string>& args) {
         return usage();
     }
 
-    const std::filesystem::path corpus_dir = args[0];
-    std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
-        return reject_missing_corpus(corpus_dir);
+    std::string error;
+    const std::unique_ptr<CorpusReader> corpus = open_corpus(args[0], error);
+    if (!corpus) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
     }
 
-    for (const std::string& id : list_document_ids(corpus_dir)) {
+    for (const std::string& id : corpus->document_ids()) {
         std::cout << id << "\n";
     }
     return 0;
@@ -195,19 +222,22 @@ int cmd_show(const std::vector<std::string>& args) {
         return usage();
     }
 
-    const std::filesystem::path corpus_dir = args[0];
     const std::string& id = args[1];
 
-    std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
-        return reject_missing_corpus(corpus_dir);
+    std::string error;
+    const std::unique_ptr<CorpusReader> corpus = open_corpus(args[0], error);
+    if (!corpus) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
     }
-    if (!std::filesystem::is_regular_file(corpus_dir / (id + ".txt"), ec)) {
+
+    const std::vector<std::string>& ids = corpus->document_ids();
+    if (std::find(ids.begin(), ids.end(), id) == ids.end()) {
         std::cerr << "search: no such document: " << id << "\n";
         return 1;
     }
 
-    const std::optional<Document> doc = read_document(corpus_dir, id);
+    const std::optional<Document> doc = corpus->read(id);
     if (!doc.has_value()) {
         std::cerr << "search: malformed document: " << id << "\n";
         return 1;
@@ -448,6 +478,199 @@ std::optional<std::filesystem::path> corpus_for_snippets(const std::string& sour
     return std::nullopt;
 }
 
+int cmd_wiki_import(const std::vector<std::string>& args) {
+    std::vector<std::string> rest;
+    std::size_t limit = 0;
+    WikiField field = WikiField::Text;
+
+    for (std::size_t i = 0; i < args.size(); i++) {
+        if (args[i] == "--abstracts") {
+            field = WikiField::OpeningText;
+            continue;
+        }
+        if (args[i] == "--limit") {
+            if (i + 1 >= args.size() || !parse_count(args[i + 1], limit)) {
+                std::cerr << "search: limit must be a non-negative integer\n";
+                return 1;
+            }
+            i++;
+            continue;
+        }
+        if (args[i].starts_with("--")) {
+            std::cerr << "search: unknown option: " << args[i] << "\n";
+            return 1;
+        }
+        rest.push_back(args[i]);
+    }
+
+    if (rest.size() != 2) {
+        return usage();
+    }
+
+    WikiImportReport report;
+    std::string error;
+    bool ok = false;
+
+    if (rest[0] == "-") {
+        ok = import_cirrussearch(std::cin, rest[1], field, limit, report, error);
+    } else {
+        std::ifstream dump(rest[0], std::ios::binary);
+        if (!dump) {
+            std::cerr << "search: cannot read " << rest[0] << "\n";
+            return 1;
+        }
+        ok = import_cirrussearch(dump, rest[1], field, limit, report, error);
+    }
+
+    if (!ok) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
+    }
+
+    std::cout << "lines " << report.lines_seen << "\n"
+              << "documents " << report.documents_written << "\n"
+              << "skipped_empty " << report.skipped_empty << "\n";
+    return 0;
+}
+
+int cmd_corpus_write(const std::vector<std::string>& args) {
+    if (args.size() != 2) {
+        return usage();
+    }
+
+    std::error_code ec;
+    if (!std::filesystem::is_directory(args[0], ec)) {
+        return reject_missing_corpus(args[0]);
+    }
+
+    std::string error;
+    if (!write_corpus_file(args[0], args[1], error)) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+int cmd_bench(const std::vector<std::string>& args) {
+    std::vector<std::string> rest;
+    bool stable_only = false;
+    std::size_t threads = 1;
+    std::size_t limit = 10;
+    std::size_t repeats = 1;
+
+    for (std::size_t i = 0; i < args.size(); i++) {
+        const std::string& argument = args[i];
+        if (!argument.starts_with("--")) {
+            rest.push_back(argument);
+            continue;
+        }
+
+        if (argument == "--stable") {
+            stable_only = true;
+            continue;
+        }
+
+        if (i + 1 >= args.size()) {
+            return usage();
+        }
+
+        std::size_t value = 0;
+        if (!parse_count(args[i + 1], value)) {
+            std::cerr << "search: expected a number after " << argument << ": " << args[i + 1]
+                      << "\n";
+            return 1;
+        }
+
+        if (argument == "--threads") {
+            if (value == 0) {
+                std::cerr << "search: threads must be a positive integer\n";
+                return 1;
+            }
+            threads = value;
+        } else if (argument == "--limit") {
+            limit = value;
+        } else if (argument == "--repeats") {
+            if (value == 0) {
+                std::cerr << "search: repeats must be a positive integer\n";
+                return 1;
+            }
+            repeats = value;
+        } else {
+            std::cerr << "search: unknown option: " << argument << "\n";
+            return 1;
+        }
+
+        i++;
+    }
+
+    if (rest.size() < 2) {
+        return usage();
+    }
+
+    const std::string& what = rest[0];
+    const std::filesystem::path source = rest[1];
+
+    std::error_code ec;
+    if (!std::filesystem::is_directory(source, ec) &&
+        !std::filesystem::is_regular_file(source, ec)) {
+        return reject_missing_corpus(source);
+    }
+
+    if (what == "build") {
+        if (rest.size() != 2) {
+            return usage();
+        }
+        if (!std::filesystem::is_directory(source, ec) && !looks_like_corpus_file(source)) {
+            std::cerr << "search: bench build needs a corpus directory or a .corpus file: "
+                      << source.string() << "\n";
+            return 1;
+        }
+        print_measurements(std::cout, bench_environment(source), stable_only);
+        print_measurements(std::cout, bench_build(source, threads), stable_only);
+        return 0;
+    }
+
+    if (what == "query") {
+        if (rest.size() != 3) {
+            return usage();
+        }
+
+        std::string text;
+        if (!read_text_file(rest[2], text)) {
+            return 1;
+        }
+
+        std::vector<std::string> queries;
+        std::istringstream lines(text);
+        std::string line;
+        while (std::getline(lines, line)) {
+            const std::size_t begin = line.find_first_not_of(" \t\r");
+            if (begin == std::string::npos) {
+                continue;
+            }
+            const std::size_t end = line.find_last_not_of(" \t\r");
+            queries.push_back(line.substr(begin, end - begin + 1));
+        }
+
+        const std::optional<InvertedIndex> opened = open_index(source, threads);
+        if (!opened.has_value()) {
+            return 1;
+        }
+        if (opened->document_count() == 0) {
+            std::cerr << "search: bench query has nothing to search in " << source.string()
+                      << "\n";
+            return 1;
+        }
+
+        print_measurements(std::cout, bench_environment(source), stable_only);
+        print_measurements(std::cout, bench_query(*opened, queries, limit, repeats), stable_only);
+        return 0;
+    }
+
+    std::cerr << "search: unknown benchmark: " << what << "\n";
+    return 1;
+}
+
 int cmd_query(const std::vector<std::string>& args) {
     std::vector<std::string> rest = args;
     QueryOptions options;
@@ -606,7 +829,7 @@ int cmd_index_update(const std::vector<std::string>& args) {
 
     const std::filesystem::path corpus_dir = rest[0];
     std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
+    if (!std::filesystem::is_directory(corpus_dir, ec) && !looks_like_corpus_file(corpus_dir)) {
         return reject_missing_corpus(corpus_dir);
     }
 
@@ -728,13 +951,14 @@ int cmd_snippet(const std::vector<std::string>& args) {
         return usage();
     }
 
-    const std::filesystem::path corpus_dir = rest[0];
-    std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
-        return reject_missing_corpus(corpus_dir);
+    std::string open_error;
+    const std::unique_ptr<CorpusReader> corpus = open_corpus(rest[0], open_error);
+    if (!corpus) {
+        std::cerr << "search: " << open_error << "\n";
+        return 1;
     }
 
-    const std::optional<Document> doc = read_document(corpus_dir, rest[1]);
+    const std::optional<Document> doc = corpus->read(rest[1]);
     if (!doc.has_value()) {
         std::cerr << "search: no such document: " << rest[1] << "\n";
         return 1;
@@ -1360,15 +1584,16 @@ int cmd_analyze_doc(const std::vector<std::string>& args) {
         return usage();
     }
 
-    const std::filesystem::path corpus_dir = args[0];
     const std::string& id = args[1];
 
-    std::error_code ec;
-    if (!std::filesystem::is_directory(corpus_dir, ec)) {
-        return reject_missing_corpus(corpus_dir);
+    std::string error;
+    const std::unique_ptr<CorpusReader> corpus = open_corpus(args[0], error);
+    if (!corpus) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
     }
 
-    const std::optional<Document> doc = read_document(corpus_dir, id);
+    const std::optional<Document> doc = corpus->read(id);
     if (!doc.has_value()) {
         std::cerr << "search: no such document: " << id << "\n";
         return 1;
@@ -1529,6 +1754,15 @@ int main(int argc, char** argv) {
     }
     if (command == "lengths") {
         return cmd_lengths(rest);
+    }
+    if (command == "wiki-import") {
+        return cmd_wiki_import(rest);
+    }
+    if (command == "corpus-write") {
+        return cmd_corpus_write(rest);
+    }
+    if (command == "bench") {
+        return cmd_bench(rest);
     }
     if (command == "query") {
         return cmd_query(rest);

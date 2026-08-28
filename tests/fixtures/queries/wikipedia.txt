@@ -1,0 +1,25 @@
+solar system
+united states
+second world war
+albert einstein
+water
+electricity
+new york city
+human body
+computer science
+climate change
+ancient rome
+periodic table
+music
+william shakespeare
+football
+democracy
+"united states" AND president
+city OR town
+chemistry NOT physics
+(france OR germany) AND river
+photosynthesis
+mount everest
+japanese language
+renaissance art
+DNA

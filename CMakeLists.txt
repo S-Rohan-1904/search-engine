@@ -54,6 +54,9 @@ add_executable(search
   src/complete.cpp
   src/pagerank.cpp
   src/results.cpp
+  src/bench.cpp
+  src/corpus_file.cpp
+  src/wiki_import.cpp
 )
 
 target_include_directories(search PRIVATE src)
