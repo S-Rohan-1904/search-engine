@@ -91,32 +91,6 @@ Anserini's k1=0.9 and b=0.4 instead of 1.2 and 0.75 moves TREC-COVID only to
 abstracts, and the handling of long queries, remain untested.
 
 The honest claim from this is the narrow one: the BM25 implementation matches a
-published Lucene baseline on SciFact. Not that it matches Lucene generally.
-
-## Two quadratic bugs, found by running against a real corpus
-
-Both were invisible on the 30-document test corpus and obvious at 278k.
-
-**Build.** `CorpusFile::read` and `fingerprint` did a linear scan over all ids,
-once per document. Indexing was about 39 billion string comparisons; it ran for
-over four minutes before being killed. Fixed with a permutation sorted by id
-and a binary search: **the build now finishes in 15.9 s.**
-
-**Query.** `bm25_weight` called `average_document_length()` once per posting
-scored, and that function re-summed all 278,214 document lengths on every call,
-making one query O(postings × documents). Ten queries ran past ten minutes.
-Fixed with a running total: **p50 is now 4.09 ms.**
-
-## A benchmark that was lying
-
-`bench query` handled a corpus _directory_ and an index file, and silently fell
-through for a `.corpus` file: the load failed, the failure was swallowed, and
-it benchmarked an empty index. It reported **0.004 ms p50 and 231,481
-queries/s** over 25 queries that returned nothing, and exited 0.
-
-It now opens its source the way every other command does, refuses an index with
-no documents, and reports a `documents` line so a report that measured nothing
-says so on its face.
 
 ## Skip pointers: measured and rejected
 
