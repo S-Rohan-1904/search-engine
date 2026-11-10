@@ -82,6 +82,10 @@ std::vector<ScoredDocument> score(const std::vector<std::string>& terms,
                                   const InvertedIndex& index, Scorer scorer,
                                   std::size_t threads);
 
+std::vector<ScoredDocument> score_unordered(const std::vector<std::string>& terms,
+                                            const InvertedIndex& index, Scorer scorer,
+                                            std::size_t threads);
+
 // The k highest-scoring entries, in the same order the scorers produce.
 //
 // Keeps a min-heap of the k best seen so far, so the cost is O(n log k) rather

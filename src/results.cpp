@@ -40,7 +40,7 @@ std::optional<std::vector<QueryResult>> run_query(
     }
 
     std::unordered_map<std::size_t, double> scored;
-    for (const ScoredDocument& document : score(terms, index, options.scorer, 1)) {
+    for (const ScoredDocument& document : score_unordered(terms, index, options.scorer, 1)) {
         if (matched.count(document.doc_id) != 0) {
             scored.emplace(document.doc_id, document.score);
         }

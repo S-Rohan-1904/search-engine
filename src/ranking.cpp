@@ -130,6 +130,14 @@ std::vector<std::string> query_terms(const std::vector<std::string>& words) {
 std::vector<ScoredDocument> score(const std::vector<std::string>& terms,
                                   const InvertedIndex& index, Scorer scorer,
                                   std::size_t threads) {
+    std::vector<ScoredDocument> merged = score_unordered(terms, index, scorer, threads);
+    std::sort(merged.begin(), merged.end(), ranks_before);
+    return merged;
+}
+
+std::vector<ScoredDocument> score_unordered(const std::vector<std::string>& terms,
+                                            const InvertedIndex& index, Scorer scorer,
+                                            std::size_t threads) {
     const std::size_t documents = index.document_count();
     const std::size_t shard_count = std::max<std::size_t>(1, std::min(threads, documents));
 
@@ -157,7 +165,6 @@ std::vector<ScoredDocument> score(const std::vector<std::string>& terms,
         }
     }
 
-    std::sort(merged.begin(), merged.end(), ranks_before);
     return merged;
 }
 
