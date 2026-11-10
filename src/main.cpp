@@ -498,12 +498,8 @@ bool take_query_options(std::vector<std::string>& args, QueryOptions& options) {
                 return false;
             }
         } else if (flag == "--pagerank-graph") {
-            if (value == "page") {
-                options.pagerank_graph = LinkGraph::Page;
-            } else if (value == "site") {
-                options.pagerank_graph = LinkGraph::Site;
-            } else if (value == "home") {
-                options.pagerank_graph = LinkGraph::Home;
+            if (const std::optional<LinkGraph> graph = parse_link_graph(value)) {
+                options.pagerank_graph = *graph;
             } else {
                 std::cerr << "search: pagerank graph must be page, site or home: " << value
                           << "\n";
@@ -636,6 +632,22 @@ std::optional<PageRankPrior> open_prior(const std::string& source, const Inverte
     return PageRankPrior::load(beside, index, error);
 }
 
+std::optional<PriorSet> open_priors(const std::string& source, const InvertedIndex& index,
+                                    const QueryOptions& options) {
+    PriorSet priors;
+    for (const LinkGraph graph : {LinkGraph::Page, LinkGraph::Site, LinkGraph::Home}) {
+        std::string error;
+        std::optional<PageRankPrior> prior = open_prior(source, index, graph, error);
+        if (prior.has_value()) {
+            priors.add(graph, std::move(*prior));
+        } else if (graph == options.pagerank_graph && options.pagerank_weight > 0.0) {
+            std::cerr << "search: " << error << "\n";
+            return std::nullopt;
+        }
+    }
+    return priors;
+}
+
 bool persist_crawl_sidecars(const std::string& source, const std::string& index_file) {
     const std::optional<std::filesystem::path> links = links_beside(source);
     if (!links.has_value()) {
@@ -702,11 +714,8 @@ int cmd_serve(const std::vector<std::string>& args) {
         return 1;
     }
 
-    std::string error;
-    const std::optional<PageRankPrior> prior =
-        open_prior(rest[0], *opened, options.pagerank_graph, error);
-    if (!prior.has_value() && options.pagerank_weight > 0.0) {
-        std::cerr << "search: " << error << "\n";
+    const std::optional<PriorSet> priors = open_priors(rest[0], *opened, options);
+    if (!priors.has_value()) {
         return 1;
     }
 
@@ -716,7 +725,7 @@ int cmd_serve(const std::vector<std::string>& args) {
                                  ? (std::filesystem::path(rest[0]) / "urls.tsv").string()
                                  : rest[0] + ".urls";
 
-    SearchService service(*opened, corpus.get(), prior.has_value() ? &*prior : nullptr,
+    SearchService service(*opened, corpus.get(), *priors,
                           read_urls(urls), options);
 
     if (from_stdin) {
@@ -733,6 +742,7 @@ int cmd_serve(const std::vector<std::string>& args) {
     std::cout << "building spelling and completion tables..." << std::endl;
     service.warm();
 
+    std::string error;
     if (!serve(service, static_cast<int>(port), error)) {
         std::cerr << "search: " << error << "\n";
         return 1;
@@ -1119,7 +1129,7 @@ struct ReplLexicon {
 };
 
 int repl_meta_command(const std::string& line, QueryOptions& options, ReplLexicon& lexicon,
-                      bool& quit) {
+                      const PriorSet& priors, bool& quit) {
     std::istringstream words(line);
     std::string name;
     std::string value;
@@ -1135,6 +1145,8 @@ int repl_meta_command(const std::string& line, QueryOptions& options, ReplLexico
                      ":scorer <name>  bm25, bm25f or tfidf\n"
                      ":snippet <on|off>\n"
                      ":pagerank <w>   weight of link authority, 0 is off\n"
+                     ":pagerank-graph <g>      page, site or home\n"
+                     ":pagerank-max-words <n>  link authority only this short, 0 is any\n"
                      ":complete <p>   indexed terms beginning with a prefix\n"
                      ":settings       show the current settings\n"
                      ":quit\n";
@@ -1144,7 +1156,9 @@ int repl_meta_command(const std::string& line, QueryOptions& options, ReplLexico
         std::cout << "limit " << options.limit << "\n"
                   << "scorer " << scorer_name(options.scorer) << "\n"
                   << "snippet " << (options.snippets ? "on" : "off") << "\n"
-                  << "pagerank " << std::defaultfloat << options.pagerank_weight << "\n";
+                  << "pagerank " << std::defaultfloat << options.pagerank_weight << "\n"
+                  << "pagerank-graph " << link_graph_name(options.pagerank_graph) << "\n"
+                  << "pagerank-max-words " << options.pagerank_max_words << "\n";
         return 0;
     }
     if (name == ":limit") {
@@ -1178,6 +1192,23 @@ int repl_meta_command(const std::string& line, QueryOptions& options, ReplLexico
             options.pagerank_weight = weight;
         } catch (const std::exception&) {
             std::cout << "pagerank must be a non-negative number\n";
+        }
+        return 0;
+    }
+    if (name == ":pagerank-graph") {
+        const std::optional<LinkGraph> graph = parse_link_graph(value);
+        if (!graph.has_value()) {
+            std::cout << "pagerank-graph must be page, site or home\n";
+        } else if (priors.find(*graph) == nullptr) {
+            std::cout << "no " << value << " ranking for this source\n";
+        } else {
+            options.pagerank_graph = *graph;
+        }
+        return 0;
+    }
+    if (name == ":pagerank-max-words") {
+        if (!parse_count(value, options.pagerank_max_words)) {
+            std::cout << "pagerank-max-words must be a non-negative integer\n";
         }
         return 0;
     }
@@ -1215,11 +1246,8 @@ int cmd_repl(const std::vector<std::string>& args) {
     // opened up front rather than at the first query that needs it.
     const std::unique_ptr<CorpusReader> corpus = open_snippet_corpus(rest[0], options, true);
 
-    std::string prior_error;
-    const std::optional<PageRankPrior> prior =
-        open_prior(rest[0], *opened, options.pagerank_graph, prior_error);
-    if (!prior.has_value() && options.pagerank_weight > 0.0) {
-        std::cerr << "search: " << prior_error << "\n";
+    const std::optional<PriorSet> priors = open_priors(rest[0], *opened, options);
+    if (!priors.has_value()) {
         return 1;
     }
 
@@ -1244,7 +1272,7 @@ int cmd_repl(const std::vector<std::string>& args) {
 
         if (line.front() == ':') {
             bool quit = false;
-            repl_meta_command(line, options, lexicon, quit);
+            repl_meta_command(line, options, lexicon, *priors, quit);
             if (quit) {
                 break;
             }
@@ -1254,7 +1282,7 @@ int cmd_repl(const std::vector<std::string>& args) {
         std::string error;
         const std::optional<std::vector<QueryResult>> results =
             run_query(*opened, corpus.get(), line, options, error,
-                      prior.has_value() ? &*prior : nullptr);
+                      priors->find(options.pagerank_graph));
         if (!results.has_value()) {
             std::cout << "error: " << error << "\n";
             continue;

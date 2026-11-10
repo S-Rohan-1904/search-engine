@@ -51,7 +51,7 @@ CASES = [
         "name": "the REPL turns it on and off",
         "argv": ["repl", "--tsv", "build/crawled"],
         "stdin": ":pagerank 1\npage\n:pagerank 0\npage\n:settings\n",
-        "stdout": BOOSTED + "\n" + PLAIN + "\nlimit 10\nscorer bm25\nsnippet off\npagerank 0",
+        "stdout": BOOSTED + "\n" + PLAIN + "\nlimit 10\nscorer bm25\nsnippet off\npagerank 0\npagerank-graph page\npagerank-max-words 0",
     },
     {
         "name": "a corpus without links writes no PageRank file",

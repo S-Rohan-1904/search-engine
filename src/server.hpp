@@ -15,7 +15,7 @@
 class SearchService {
 public:
     SearchService(const InvertedIndex& index, const CorpusReader* corpus,
-                  const PageRankPrior* prior,
+                  const PriorSet& priors,
                   std::unordered_map<std::string, std::string> urls, QueryOptions defaults);
 
     HttpResponse handle(const HttpRequest& request);
@@ -42,7 +42,7 @@ private:
 
     const InvertedIndex& index_;
     const CorpusReader* corpus_;
-    const PageRankPrior* prior_;
+    const PriorSet& priors_;
     std::unordered_map<std::string, std::string> urls_;
     QueryOptions defaults_;
     std::optional<BkTree> tree_;

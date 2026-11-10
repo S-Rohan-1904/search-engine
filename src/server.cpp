@@ -107,6 +107,21 @@ bool parse_limit(const std::string& text, std::size_t& out) {
     return true;
 }
 
+bool parse_word_count(const std::string& text, std::size_t& out) {
+    if (text.empty() || text.size() > 4) {
+        return false;
+    }
+    std::size_t value = 0;
+    for (const char c : text) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+        value = value * 10 + static_cast<std::size_t>(c - '0');
+    }
+    out = value;
+    return true;
+}
+
 std::string flatten(const std::string& text) {
     std::string out;
     bool space = false;
@@ -143,12 +158,12 @@ std::string page(const std::string& query, const std::string& content) {
 }
 
 SearchService::SearchService(const InvertedIndex& index, const CorpusReader* corpus,
-                             const PageRankPrior* prior,
+                             const PriorSet& priors,
                              std::unordered_map<std::string, std::string> urls,
                              QueryOptions defaults)
     : index_(index),
       corpus_(corpus),
-      prior_(prior),
+      priors_(priors),
       urls_(std::move(urls)),
       defaults_(std::move(defaults)) {
     defaults_.snippets = corpus_ != nullptr;
@@ -236,13 +251,37 @@ SearchService::Answer SearchService::answer(const HttpRequest& request) {
         return out;
     }
 
+    const auto graph = request.query.find("graph");
+    if (graph != request.query.end()) {
+        const std::optional<LinkGraph> parsed = parse_link_graph(graph->second);
+        if (!parsed.has_value()) {
+            out.error = "graph must be page, site or home";
+            return out;
+        }
+        out.options.pagerank_graph = *parsed;
+    }
+
+    const auto max_words = request.query.find("max_words");
+    if (max_words != request.query.end() &&
+        !parse_word_count(max_words->second, out.options.pagerank_max_words)) {
+        out.error = "max_words must be a whole number below 10000";
+        return out;
+    }
+
+    const PageRankPrior* prior = priors_.find(out.options.pagerank_graph);
+    if (prior == nullptr && out.options.pagerank_weight > 0.0) {
+        out.error = std::string("no ") + link_graph_name(out.options.pagerank_graph) +
+                    " ranking for this index";
+        return out;
+    }
+
     if (out.query.find_first_not_of(" \t") == std::string::npos) {
         return out;
     }
 
     std::string error;
     std::optional<std::vector<QueryResult>> results =
-        run_query(index_, corpus_, out.query, out.options, error, prior_);
+        run_query(index_, corpus_, out.query, out.options, error, prior);
     if (!results.has_value()) {
         out.error = error;
         return out;

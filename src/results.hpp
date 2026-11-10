@@ -13,14 +13,6 @@
 #include "prior.hpp"
 #include "ranking.hpp"
 
-// Which link graph the PageRank prior comes from. `Page` ranks every crawled
-// page by the links between pages. `Site` ranks hosts by the links between
-// different hosts and credits each host's score to its home page; see
-// siterank.hpp. `Home` reads no links: every home page gets the same score,
-// the control that showed most of the site-level gain is preferring home
-// pages at all.
-enum class LinkGraph { Page, Site, Home };
-
 // How a search should be run and shown.
 struct QueryOptions {
     std::size_t limit = 10;

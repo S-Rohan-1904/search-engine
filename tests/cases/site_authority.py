@@ -23,6 +23,12 @@ HOME_BOOSTED = (
     "doc_0004\t0.0987\ndoc_0005\t0.0641\ndoc_0006\t0.0613"
 )
 
+
+
+def request(target):
+    return f"GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n"
+
+
 CASES = [
     {
         "name": "links within a host and to uncrawled pages are dropped; scores go to home pages",
@@ -100,6 +106,53 @@ CASES = [
                  "build/fx-no-links.idx", "cat"],
         "exit_code": 1,
         "stderr_not_empty": True,
+    },
+    {
+        "name": "the REPL switches graph between queries",
+        "argv": ["repl", "--tsv", "--pagerank", "1", SITES],
+        "stdin": "garden\n:pagerank-graph site\ngarden\n:pagerank-graph home\ngarden\n"
+                 ":settings\n",
+        "stdout": PAGE_BOOSTED + "\n" + SITE_BOOSTED + "\n" + HOME_BOOSTED +
+                  "\nlimit 10\nscorer bm25\nsnippet off\npagerank 1\npagerank-graph home"
+                  "\npagerank-max-words 0",
+    },
+    {
+        "name": "the REPL refuses a graph it has no ranking for and keeps the old one",
+        "argv": ["repl", "--tsv", "build/fx-no-links.idx"],
+        "stdin": ":pagerank-graph site\n:pagerank-graph tree\n:settings\n",
+        "stdout": "no site ranking for this source\npagerank-graph must be page, site or home\n"
+                  "limit 10\nscorer bm25\nsnippet off\npagerank 0\npagerank-graph page"
+                  "\npagerank-max-words 0",
+    },
+    {
+        "name": "the server takes the graph from the url",
+        "argv": ["serve", "--stdin", SITES],
+        "stdin": request("/api/search?q=garden&limit=1&pagerank=1&graph=site"),
+        "stdout_contains": ['"results":[{"id":"doc_0003","score":0.1091,'],
+    },
+    {
+        "name": "and the home graph",
+        "argv": ["serve", "--stdin", SITES],
+        "stdin": request("/api/search?q=garden&limit=1&pagerank=1&graph=home"),
+        "stdout_contains": ['"results":[{"id":"doc_0001","score":0.1138,'],
+    },
+    {
+        "name": "an index serves the graphs kept beside it",
+        "argv": ["serve", "--stdin", "build/sites-prior.idx"],
+        "stdin": request("/api/search?q=garden&limit=1&pagerank=1&graph=site"),
+        "stdout_contains": ['"results":[{"id":"doc_0003","score":0.1091,'],
+    },
+    {
+        "name": "an unknown graph in the url is a 400",
+        "argv": ["serve", "--stdin", SITES],
+        "stdin": request("/api/search?q=garden&pagerank=1&graph=tree"),
+        "stdout_contains": ["HTTP/1.1 400", "graph must be page, site or home"],
+    },
+    {
+        "name": "so is asking for link authority the index has no ranking for",
+        "argv": ["serve", "--stdin", "build/fx-no-links.idx"],
+        "stdin": request("/api/search?q=cat&pagerank=1&graph=site"),
+        "stdout_contains": ["HTTP/1.1 400", "no site ranking for this index"],
     },
     {
         "name": "an index with no site ranking beside it is an error",

@@ -138,7 +138,7 @@ the crawler uses it.
 ```console
 $ cmake -S . -B build && cmake --build build -j
 $ python3 tests/runner.py
-All 957 checks passing.
+All 967 checks passing.
 ```
 
 Tests are end-to-end: each case runs the real binary and compares its output,

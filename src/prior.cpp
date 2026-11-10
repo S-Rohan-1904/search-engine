@@ -46,6 +46,40 @@ std::size_t PageRankPrior::covered() const {
     return covered_;
 }
 
+std::optional<LinkGraph> parse_link_graph(std::string_view text) {
+    if (text == "page") {
+        return LinkGraph::Page;
+    }
+    if (text == "site") {
+        return LinkGraph::Site;
+    }
+    if (text == "home") {
+        return LinkGraph::Home;
+    }
+    return std::nullopt;
+}
+
+const char* link_graph_name(LinkGraph graph) {
+    switch (graph) {
+        case LinkGraph::Page:
+            return "page";
+        case LinkGraph::Site:
+            return "site";
+        case LinkGraph::Home:
+            return "home";
+    }
+    return "page";
+}
+
+void PriorSet::add(LinkGraph graph, PageRankPrior prior) {
+    priors_[static_cast<std::size_t>(graph)] = std::move(prior);
+}
+
+const PageRankPrior* PriorSet::find(LinkGraph graph) const {
+    const std::optional<PageRankPrior>& prior = priors_[static_cast<std::size_t>(graph)];
+    return prior.has_value() ? &*prior : nullptr;
+}
+
 bool read_links(const std::filesystem::path& path,
                 std::vector<std::pair<std::string, std::string>>& links, std::string& error) {
     std::ifstream in(path);

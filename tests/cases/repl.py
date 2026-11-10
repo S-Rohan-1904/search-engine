@@ -44,13 +44,13 @@ CASES = [
         "name": "settings can be inspected",
         "argv": ["repl", "corpus/fixtures"],
         "stdin": ":settings\n",
-        "stdout": "limit 10\nscorer bm25\nsnippet off\npagerank 0",
+        "stdout": "limit 10\nscorer bm25\nsnippet off\npagerank 0\npagerank-graph page\npagerank-max-words 0",
     },
     {
         "name": "settings reflect what was changed",
         "argv": ["repl", "corpus/fixtures"],
         "stdin": ":limit 3\n:scorer tfidf\n:snippet on\n:settings\n",
-        "stdout": "limit 3\nscorer tfidf\nsnippet on\npagerank 0",
+        "stdout": "limit 3\nscorer tfidf\nsnippet on\npagerank 0\npagerank-graph page\npagerank-max-words 0",
     },
     {
         "name": "snippets can be switched on",
@@ -62,7 +62,7 @@ CASES = [
         "name": "help lists the commands",
         "argv": ["repl", "corpus/fixtures"],
         "stdin": ":help\n",
-        "stdout": "queries use AND, OR, NOT, parentheses and \"phrases\"\n:limit <n>      how many results to show\n:scorer <name>  bm25, bm25f or tfidf\n:snippet <on|off>\n:pagerank <w>   weight of link authority, 0 is off\n:complete <p>   indexed terms beginning with a prefix\n:settings       show the current settings\n:quit",
+        "stdout": "queries use AND, OR, NOT, parentheses and \"phrases\"\n:limit <n>      how many results to show\n:scorer <name>  bm25, bm25f or tfidf\n:snippet <on|off>\n:pagerank <w>   weight of link authority, 0 is off\n:pagerank-graph <g>      page, site or home\n:pagerank-max-words <n>  link authority only this short, 0 is any\n:complete <p>   indexed terms beginning with a prefix\n:settings       show the current settings\n:quit",
     },
     {
         "name": "quit ends the session early",
@@ -92,13 +92,13 @@ CASES = [
         "name": "a bad setting value is rejected without changing anything",
         "argv": ["repl", "corpus/fixtures"],
         "stdin": ":limit x\n:settings\n",
-        "stdout": "limit must be a non-negative integer\nlimit 10\nscorer bm25\nsnippet off\npagerank 0",
+        "stdout": "limit must be a non-negative integer\nlimit 10\nscorer bm25\nsnippet off\npagerank 0\npagerank-graph page\npagerank-max-words 0",
     },
     {
         "name": "an unknown scorer is rejected",
         "argv": ["repl", "corpus/fixtures"],
         "stdin": ":scorer bogus\n:settings\n",
-        "stdout": "scorer must be bm25, bm25f or tfidf\nlimit 10\nscorer bm25\nsnippet off\npagerank 0",
+        "stdout": "scorer must be bm25, bm25f or tfidf\nlimit 10\nscorer bm25\nsnippet off\npagerank 0\npagerank-graph page\npagerank-max-words 0",
     },
     {
         "name": "end of input ends the session",

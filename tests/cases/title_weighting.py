@@ -41,7 +41,7 @@ CASES = [
         "name": "the REPL can switch to it",
         "argv": ["repl", "--tsv", "tests/fixtures/fields"],
         "stdin": ":scorer bm25f\nrust\n:settings\n",
-        "stdout": BM25F + "\nlimit 10\nscorer bm25f\nsnippet off\npagerank 0",
+        "stdout": BM25F + "\nlimit 10\nscorer bm25f\nsnippet off\npagerank 0\npagerank-graph page\npagerank-max-words 0",
     },
     {
         "name": "a word in no title scores as body text alone",
