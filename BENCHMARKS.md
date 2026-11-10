@@ -320,6 +320,83 @@ The default weight stays 0, `--pagerank 0.05` is the setting for navigational
 search over a crawl of many sites, and BM25F's title weighting, which helps on
 every test here, is the stronger single change.
 
+### Is it PageRank, or the crawl?
+
+The results above mix three things: what PageRank is, how the link graph was
+built, and how small the crawls are. Three experiments pull them apart. Each
+reports the change in MRR@10 against the same scorer with PageRank off, with a
+95% interval from 2,000 bootstrap resamples of the per-query change.
+
+**1. A large graph with no crawl in it.** Simple English Wikipedia's own link
+graph, read from the `outgoing_link` field of the CirrusSearch dump: 278,214
+articles and 12,623,345 links between them, written by thousands of editors,
+with no crawl order and no per-site cap. Two query sets of 2,000 each, both
+with answers set by people rather than by this code:
+
+- navigational: a redirect's title ("USA"), answered by the article it
+  redirects to ("United States"), drawn at random from 105,229 redirects;
+- title lookup: an article's own title, drawn at random from all articles.
+
+| Test          | Scorer | Weight 0.05 | Weight 0.1                 | Weight 0.25 |
+| ------------- | ------ | ----------- | -------------------------- | ----------- |
+| Navigational  | BM25   | +0.029      | +0.035 (+0.025 to +0.044)  | +0.008      |
+| Navigational  | BM25F  |             | +0.034 (+0.024 to +0.043)  | -0.001      |
+| Title lookup  | BM25   | +0.005      | -0.007 (-0.015 to -0.001)  | -0.072      |
+| Title lookup  | BM25F  |             | -0.011 (-0.018 to -0.005)  | -0.077      |
+
+Baselines: navigational 0.5734 (BM25) and 0.5925 (BM25F); title lookup 0.9038
+and 0.9228.
+
+The pattern from the crawl holds on a graph with 450 times as many links, and the
+navigational gain is now clear on BM25F as well, where 148 crawl queries could
+not show it. Wikipedia's highest PageRank articles are Wayback Machine, United
+States, ISBN and IMDb: citation templates do here what navigation bars do on a
+site. Removing links to the 51 articles that more than 2% of all articles link
+to changed no figure by more than 0.003.
+
+**2. Building the crawl's graph better.** Four graphs from the same 2,994-page
+crawl: every link; links that appear on more than half of a site's pages
+removed; links within a site removed; and site-level PageRank, computed over
+the 3,343 links between sites and credited to each site's home page.
+
+| Graph                  | Home page, BM25 (w 0.25) | Home page, BM25F (w 0.1) | Title lookup, BM25 (w 0.05) |
+| ---------------------- | ------------------------ | ------------------------ | --------------------------- |
+| Every link             | +0.051 (+0.004, +0.095)  | +0.032 (-0.012, +0.073)  | -0.013                      |
+| Template links removed | +0.030 (-0.021, +0.080)  | +0.040 (-0.003, +0.084)  | -0.026                      |
+| Between sites only     | +0.085 (+0.031, +0.137)  | +0.072 (+0.023, +0.119)  | -0.028                      |
+| Site-level             | **+0.211 (+0.159, +0.260)** | **+0.169 (+0.122, +0.217)** | **-0.013**               |
+
+Site-level PageRank takes homepage finding from 0.5645 to 0.7751 on BM25 (66
+queries better, 3 worse) and from 0.6397 to 0.8353 on BM25F at weight 0.25. On
+the documentation crawl, removing template links reduced the damage (-0.044 to
+-0.040 at weight 0.05) but did not remove it.
+
+**3. Using it only where it belongs.** PageRank applied only to queries of one
+or two words, where navigational queries concentrate, and plain text scoring
+otherwise:
+
+| Data and graph            | Rule             | Navigational | Title lookup        |
+| ------------------------- | ---------------- | ------------ | ------------------- |
+| Crawl, site-level, w 0.25 | always           | +0.211       | -0.077              |
+| Crawl, site-level, w 0.25 | two words or less | +0.139      | -0.004              |
+| Wikipedia, w 0.1          | always           | +0.035       | -0.007              |
+| Wikipedia, w 0.1          | two words or less | +0.031      | -0.003 (not significant) |
+
+A rule that treats a query as navigational when it names a crawled site was
+also tried and does not work: 1,758 of 2,387 page titles name their own site.
+
+**The answer.** Both, in different parts:
+
+- Lowering lookups of a particular page is PageRank's. It holds on every
+  graph, every construction and every weight above 0.05, because a
+  query-independent prior favours popular pages whatever was asked.
+- The size of the navigational gain was the crawl's, and the graph
+  construction's. Page-level PageRank on a 3,000-page crawl gave +0.07 with a
+  wide interval; Wikipedia's 12.6 million links give a tight +0.035; ranking
+  sites instead of pages gives +0.21 on the crawl.
+- What to do follows: compute it per site, and apply it to short queries. That
+  keeps two thirds or more of the gain and nearly none of the cost.
+
 ## Skip pointers: measured and rejected
 
 Galloping search in postings intersection, the expected optimisation, made

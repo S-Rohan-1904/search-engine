@@ -115,13 +115,14 @@ were kept whole; and nDCG used exponential gain where `trec_eval` uses linear.
 The engine's own nDCG agrees with `pytrec_eval` on its run file to four
 places. The whole account is in [BENCHMARKS.md](BENCHMARKS.md).
 
-**PageRank, measured on two kinds of graph.** On a crawl of three documentation
-sites it lowered MRR@10 at every weight, because inside a site the
-best-linked pages are the indexes in every navigation bar. On a 2,994-page
-crawl across 1,096 independent sites it raised homepage finding from 0.565 to
-0.638 MRR@10 (95% interval of the gain +0.035 to +0.114), and still lowered
-lookups of ordinary pages. The default weight is 0; `--pagerank 0.05` is for
-navigational search across many sites.
+**PageRank, measured on three kinds of graph.** On a documentation crawl it
+lowered MRR@10 at every weight: inside a site the best-linked pages are the
+indexes in every navigation bar. On Wikipedia's 12.6 million links it raised
+navigational queries by 0.035 and lowered lookups of a particular article by
+0.007, both with intervals clear of zero, so the cost is PageRank's own. On a
+crawl of 1,096 sites, ranking sites instead of pages raised homepage finding
+from 0.565 to 0.775, and applying it only to one- and two-word queries kept two
+thirds of that gain while cutting the cost to 0.004.
 
 ## Building
 
