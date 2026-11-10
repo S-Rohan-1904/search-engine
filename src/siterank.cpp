@@ -1,27 +1,43 @@
 #include "siterank.hpp"
 
+#include <algorithm>
 #include <optional>
 #include <unordered_map>
 
 #include "prior.hpp"
 #include "url.hpp"
 
-std::vector<RankedPage> site_pagerank(const std::vector<std::pair<std::string, std::string>>& links,
-                                      const std::vector<std::pair<std::string, std::string>>& urls,
-                                      std::size_t iterations, double damping) {
+namespace {
+
+struct Sites {
     std::unordered_map<std::string, std::string> host_of;
     std::unordered_map<std::string, std::string> home_of;
-    host_of.reserve(urls.size());
+};
+
+Sites map_sites(const std::vector<std::pair<std::string, std::string>>& urls) {
+    Sites sites;
+    sites.host_of.reserve(urls.size());
     for (const auto& [page, text] : urls) {
         const std::optional<Url> url = parse_url(text);
         if (!url.has_value()) {
             continue;
         }
-        host_of.emplace(page, url->host);
+        sites.host_of.emplace(page, url->host);
         if (url->path == "/" && url->query.empty()) {
-            home_of.emplace(url->host, page);
+            sites.home_of.emplace(url->host, page);
         }
     }
+    return sites;
+}
+
+}
+
+std::vector<RankedPage> site_pagerank(const std::vector<std::pair<std::string, std::string>>& links,
+                                      const std::vector<std::pair<std::string, std::string>>& urls,
+                                      std::size_t iterations, double damping) {
+    const Sites sites = map_sites(urls);
+    const auto& host_of = sites.host_of;
+    const auto& home_of = sites.home_of;
 
     std::vector<std::pair<std::string, std::string>> host_links;
     for (const auto& [from, to] : links) {
@@ -42,6 +58,20 @@ std::vector<RankedPage> site_pagerank(const std::vector<std::pair<std::string, s
         }
     }
     return credited;
+}
+
+std::vector<RankedPage> home_page_ranking(
+    const std::vector<std::pair<std::string, std::string>>& urls) {
+    std::vector<RankedPage> homes;
+    for (const auto& [host, page] : map_sites(urls).home_of) {
+        homes.push_back(RankedPage{page, 0.0});
+    }
+    std::sort(homes.begin(), homes.end(),
+              [](const RankedPage& a, const RankedPage& b) { return a.page < b.page; });
+    for (RankedPage& home : homes) {
+        home.score = 1.0 / static_cast<double>(homes.size());
+    }
+    return homes;
 }
 
 bool read_page_urls(const std::filesystem::path& path,

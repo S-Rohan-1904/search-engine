@@ -91,8 +91,9 @@ int usage() {
                  "      --max-chars <n>          how long an excerpt may be\n"
                  "      --tsv                    id and score, tab separated\n"
                  "      --pagerank <weight>      scale scores by link authority\n"
-                 "      --pagerank-graph page|site\n"
-                 "                               rank pages, or sites credited to home pages\n"
+                 "      --pagerank-graph page|site|home\n"
+                 "                               rank pages, sites credited to home pages,\n"
+                 "                               or every home page alike\n"
                  "      --pagerank-max-words <n> link authority only for queries this short\n"
                  "  repl [options] <source>      read queries until end of input\n"
                  "  bench build <source>         measure index construction\n"
@@ -501,8 +502,11 @@ bool take_query_options(std::vector<std::string>& args, QueryOptions& options) {
                 options.pagerank_graph = LinkGraph::Page;
             } else if (value == "site") {
                 options.pagerank_graph = LinkGraph::Site;
+            } else if (value == "home") {
+                options.pagerank_graph = LinkGraph::Home;
             } else {
-                std::cerr << "search: pagerank graph must be page or site: " << value << "\n";
+                std::cerr << "search: pagerank graph must be page, site or home: " << value
+                          << "\n";
                 return false;
             }
         } else if (flag == "--scorer") {
@@ -601,6 +605,19 @@ std::string ranking_suffix(LinkGraph graph) {
 
 std::optional<PageRankPrior> open_prior(const std::string& source, const InvertedIndex& index,
                                         LinkGraph graph, std::string& error) {
+    if (graph == LinkGraph::Home) {
+        std::error_code ec;
+        const std::filesystem::path urls = std::filesystem::is_directory(source, ec)
+                                               ? std::filesystem::path(source) / "urls.tsv"
+                                               : std::filesystem::path(source + ".urls");
+        std::vector<std::pair<std::string, std::string>> pages;
+        if (!read_page_urls(urls, pages, error)) {
+            error = "no home pages for " + source + ": expected " + urls.string();
+            return std::nullopt;
+        }
+        return PageRankPrior(home_page_ranking(pages), index);
+    }
+
     if (const std::optional<std::filesystem::path> links = links_beside(source)) {
         const std::optional<std::vector<RankedPage>> ranking = rank_crawl(*links, graph, error);
         if (!ranking.has_value()) {

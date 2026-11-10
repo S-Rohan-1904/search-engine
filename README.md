@@ -53,7 +53,8 @@ matching uses the stored token positions.
 **Ranking.** TF-IDF, BM25, and BM25F with title matches weighted over body
 matches, scored in parallel across document shards. PageRank over the crawled
 link graph, per page or per site with each site's score given to its home page,
-available as a multiplier on the text score.
+or a flat boost to every home page; any of them as a multiplier on the text
+score.
 
 **Crawler.** robots.txt parsing, a BFS frontier with URL normalization and
 deduplication, path-prefix scoping, HTML-to-text extraction, rate limiting, and
@@ -125,8 +126,9 @@ crawl of 1,096 sites, ranking sites instead of pages (`--pagerank-graph site`)
 raised homepage finding from 0.565 to 0.775, and applying it only to one- and
 two-word queries (`--pagerank-max-words 2`) kept two thirds of that gain while
 cutting the cost to 0.004. A control then gave every home page the same boost,
-with no links at all: that reached 0.851, so most of the site-level gain is
-preferring home pages, and the links add 0.02 to 0.03 over chance.
+with no links at all (`--pagerank-graph home`): that reached 0.851, so most of
+the site-level gain is preferring home pages, and the links add 0.02 to 0.03
+over chance.
 
 ## Building
 
@@ -136,7 +138,7 @@ the crawler uses it.
 ```console
 $ cmake -S . -B build && cmake --build build -j
 $ python3 tests/runner.py
-All 954 checks passing.
+All 957 checks passing.
 ```
 
 Tests are end-to-end: each case runs the real binary and compares its output,

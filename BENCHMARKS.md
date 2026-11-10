@@ -424,6 +424,12 @@ beat every one of the 5 shuffles of the same scores, by +0.029 on BM25 and
 +0.018 on BM25F on average. That is the part of the gain that is link
 analysis.
 
+The flat boost is in the engine as `--pagerank-graph home`, which reads the
+home pages from the crawl's URLs and needs no links. Through it the figures
+above come out the same to four places: 0.8510 on BM25 and 0.9019 on BM25F for
+home pages at weight 0.25, -0.081 on title lookup, and +0.172 with
+`--pagerank-max-words 2`.
+
 **The answer.** Three parts:
 
 - Lowering lookups of a particular page is PageRank's. It holds on every

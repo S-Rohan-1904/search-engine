@@ -1,4 +1,4 @@
-"""`--pagerank-graph site` -- PageRank over hosts, credited to home pages."""
+"""`--pagerank-graph site|home` -- PageRank over hosts, or a flat home-page prior."""
 
 NAME = "Site-level link authority"
 ORDER = 545
@@ -16,6 +16,11 @@ PAGE_BOOSTED = (
 SITE_BOOSTED = (
     "doc_0003\t0.1091\ndoc_0002\t0.1089\ndoc_0001\t0.1015\ndoc_0004\t0.0987\n"
     "doc_0007\t0.0672\ndoc_0005\t0.0641\ndoc_0006\t0.0613"
+)
+
+HOME_BOOSTED = (
+    "doc_0001\t0.1138\ndoc_0003\t0.1138\ndoc_0007\t0.1138\ndoc_0002\t0.1089\n"
+    "doc_0004\t0.0987\ndoc_0005\t0.0641\ndoc_0006\t0.0613"
 )
 
 CASES = [
@@ -77,6 +82,24 @@ CASES = [
         "argv": ["repl", "--tsv", "--pagerank-graph", "site", SITES],
         "stdin": ":pagerank 1\ngarden\n:pagerank 0\ngarden\n",
         "stdout": SITE_BOOSTED + "\n" + PLAIN,
+    },
+    {
+        "name": "the home graph lifts every home page alike, linked to or not",
+        "argv": ["query", "--tsv", "--pagerank", "1", "--pagerank-graph", "home", SITES, "garden"],
+        "stdout": HOME_BOOSTED,
+    },
+    {
+        "name": "and an index finds its home pages in the urls kept beside it",
+        "argv": ["query", "--tsv", "--pagerank", "1", "--pagerank-graph", "home",
+                 "build/sites-prior.idx", "garden"],
+        "stdout": HOME_BOOSTED,
+    },
+    {
+        "name": "an index with no urls beside it has no home pages to lift",
+        "argv": ["query", "--pagerank", "1", "--pagerank-graph", "home",
+                 "build/fx-no-links.idx", "cat"],
+        "exit_code": 1,
+        "stderr_not_empty": True,
     },
     {
         "name": "an index with no site ranking beside it is an error",

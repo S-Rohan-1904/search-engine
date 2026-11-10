@@ -44,6 +44,17 @@ std::vector<RankedPage> site_pagerank(const std::vector<std::pair<std::string, s
                                       const std::vector<std::pair<std::string, std::string>>& urls,
                                       std::size_t iterations, double damping);
 
+// Every home page in a crawl with the same score, 1 / (number of home pages):
+// the prior site-level PageRank has to beat. It favours a page for being a
+// site's front door and for nothing else, using no links at all. On the
+// 1,096-site crawl it found home pages better than site-level PageRank did,
+// which is how most of that gain turned out to be this.
+//
+// Home pages are chosen as in `site_pagerank()`: path "/", no query string,
+// the first listed when a host has two. Ordered by page name.
+std::vector<RankedPage> home_page_ranking(
+    const std::vector<std::pair<std::string, std::string>>& urls);
+
 // Reads a crawl's urls.tsv: one page and its URL per line, tab separated, in
 // file order.
 bool read_page_urls(const std::filesystem::path& path,

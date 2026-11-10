@@ -56,6 +56,7 @@ file — pass the corpus and it will just answer slowly by rebuilding first.
 ./build/search query --pagerank 0.1 <crawl.idx> 'create table'     # link authority
 ./build/search query --pagerank 0.25 --pagerank-graph site <crawl.idx> 'python'   # per site
 ./build/search query --pagerank 0.25 --pagerank-graph site --pagerank-max-words 2 <crawl.idx> 'python'
+./build/search query --pagerank 0.25 --pagerank-graph home <crawl.idx> 'python'   # every home page alike
 ./build/search repl <index.idx>      # :scorer, :pagerank, :complete, did-you-mean
 ./build/search serve --port 8080 <index.idx>   # http://127.0.0.1:8080/
 ```
