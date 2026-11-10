@@ -162,6 +162,14 @@ def run_case(case: dict) -> tuple[bool, str]:
         if expected != actual:
             problems.append("    stdout mismatch:\n" + render_diff(expected, actual))
 
+    for needle in case.get("stdout_contains", []):
+        if needle not in proc.stdout:
+            problems.append(f"    stdout does not contain {S.green(needle)}")
+
+    for needle in case.get("stdout_lacks", []):
+        if needle in proc.stdout:
+            problems.append(f"    stdout contains {S.red(needle)}")
+
     if case.get("stderr_not_empty") and proc.stderr.strip() == "":
         problems.append("    expected an error message on stderr, but stderr was empty")
 
