@@ -8,15 +8,23 @@ printed beside it. A number without a way to reproduce it is not a measurement.
 warnings.
 
 **Corpus:** Simple English Wikipedia, CirrusSearch dump of 2025-12-29, imported
-with `search wiki-import`.
+with `search wiki-import`. Measured 2026-11-10, after the analyzer began
+splitting compounds at hyphens and slashes, which is why there are fewer
+distinct terms and more postings than an earlier run of the same corpus
+(1,443,435 and 25,643,127).
 
     documents        278,214
-    distinct terms 1,443,435
-    postings      25,643,127
+    distinct terms 1,204,562
+    postings      26,162,711
     corpus bytes 424,874,389
 
 Query timings are warm: the page cache holds the index. Cold runs are several
 times slower and are not what an interactive tool does after its first query.
+
+Everything in the four sections below comes from one run of
+`./tools/bench.sh corpus/wikipedia/simplewiki.corpus`, except the latency rows,
+which were re-measured with `search bench query` after the change described
+under them.
 
 ---
 
@@ -24,52 +32,68 @@ times slower and are not what an interactive tool does after its first query.
 
 | Measurement      | Value                    | Reproduce with                            |
 | ---------------- | ------------------------ | ----------------------------------------- |
-| Build, 1 thread  | 40.9 s                   | `search bench build --threads 1 <corpus>` |
-| Build, 8 threads | 15.9 s                   | `search bench build --threads 8 <corpus>` |
-| Parallel speedup | 2.54x                    | the two rows above                        |
-| Ingest rate      | 15,435 docs/s, 22.5 MB/s | `search bench build --threads 8 <corpus>` |
-| Corpus open      | 41 ms                    | `open_ms` in the same output              |
+| Build, 1 thread  | 28.8 s                   | `search bench build --threads 1 <corpus>` |
+| Build, 8 threads | 8.7 s                    | `search bench build --threads 8 <corpus>` |
+| Parallel speedup | 3.30x                    | the two rows above                        |
+| Ingest rate      | 31,883 docs/s, 46.4 MB/s | `search bench build --threads 8 <corpus>` |
+| Corpus open      | 25 ms                    | `open_ms` in the same output              |
 
-`bench build` reports the build in three phases — `open_ms`, `index_ms`,
-`merge_ms` — because a single total cannot say where a speedup stops. At 8
-threads the serial merge is about 3.4 s of the 15.9 s, which is what caps the
-speedup at 2.54x rather than anything about the parallel phase.
+`bench build` reports the build in three phases, `open_ms`, `index_ms` and
+`merge_ms`, because a single total cannot say where a speedup stops. At 8
+threads the serial merge is 2.0 s of the 8.7 s, which is what caps the speedup
+at 3.30x rather than anything about the parallel phase.
 
 ## Index size
 
 | Measurement           | Value               | Reproduce with              |
 | --------------------- | ------------------- | --------------------------- |
-| Uncompressed          | 1,024,973,539 bytes | `search index-size <index>` |
-| Delta + variable-byte | 187,589,343 bytes   | same                        |
-| Compression ratio     | 5.46x               | same                        |
+| Uncompressed          | 1,041,969,371 bytes | `search index-size <index>` |
+| Delta + variable-byte | 186,289,329 bytes   | same                        |
+| Compression ratio     | 5.59x               | same                        |
 
 ## Query latency
 
-25 queries — keyword, boolean, and phrase — 5 repeats each.
+25 queries (keyword, boolean and phrase), 5 repeats each.
 
 | Measurement                            | Value         | Reproduce with                                     |
 | -------------------------------------- | ------------- | -------------------------------------------------- |
-| Startup, one query, total process time | 50 ms         | `time search query <index> 'solar system'`         |
-| p50                                    | 4.09 ms       | `search bench query --repeats 5 <index> <queries>` |
-| p95                                    | 33.8 ms       | same                                               |
-| p99                                    | 44.5 ms       | same                                               |
-| Throughput                             | 113 queries/s | same                                               |
-| p50, with snippets                     | 6.43 ms       | add `--snippet`                                    |
-| p95, with snippets                     | 42.3 ms       | same                                               |
-| Peak memory, serving                   | 101 MB        | `/usr/bin/time -l` on the above                    |
+| Startup, one query, total process time | 35 ms         | `time search query <index> 'solar system'`         |
+| p50                                    | 1.35 ms       | `search bench query --repeats 5 <index> <queries>` |
+| p95                                    | 12.0 ms       | same                                               |
+| p99                                    | 17.1 ms       | same                                               |
+| Throughput                             | 327 queries/s | same                                               |
+| p50, with snippets                     | 2.64 ms       | add `--snippet`                                    |
+| p95, with snippets                     | 14.0 ms       | same                                               |
+| Peak memory, serving                   | 97 MB         | `/usr/bin/time -l` on the above                    |
+
+### Where query time went
+
+Sampling the query benchmark with macOS `sample` put about 37% of the time in
+`std::sort` over every scored document, inside the scorer, and most of the
+rest in hash-map bookkeeping around it. BM25 arithmetic itself was a few
+percent. The full sort was wasted: the query path re-ranks with a bounded heap
+of the top k anyway. The query path now asks for scores unordered. Same 250
+results for the 25 queries; measured on the same index, minutes apart:
+
+| Measurement | Sorted     | Unordered  |
+| ----------- | ---------- | ---------- |
+| p50         | 2.31 ms    | 1.35 ms    |
+| p95         | 19.2 ms    | 12.0 ms    |
+| Throughput  | 202 q/s    | 327 q/s    |
+
+The same profile is why there is no WAND or block-max pruning here. Those
+avoid scoring documents that cannot reach the top k; scoring was not the cost.
 
 ## Memory during construction
 
-| Build                       | Blocks | Peak memory | Wall clock |
-| --------------------------- | ------ | ----------- | ---------- |
-| In memory, 8 threads        | 1      | 2.92 GB     | 15.9 s     |
-| In memory, 1 thread         | 1      | 2.53 GB     | 40.9 s     |
-| `index-build --block 25000` | 12     | 1.01 GB     | 59.7 s     |
-| `index-build --block 5000`  | 56     | 0.72 GB     | 66.2 s     |
+| Build                       | Blocks | Peak memory |
+| --------------------------- | ------ | ----------- |
+| In memory, 8 threads        | 1      | 3.12 GB     |
+| `index-build --block 27822` | 10     | 1.06 GB     |
 
-The block builds produce a file byte-identical to the in-memory build's, at
-every block size tested, so the block size is a memory setting and not a
-correctness question.
+The block build produces a file byte-identical to the in-memory build's
+(checked with `cmp` by the same script), so the block size is a memory setting
+and not a correctness question.
 
 ## Relevance
 
@@ -77,12 +101,14 @@ Measured against BEIR, whose corpora, queries and relevance judgements are
 public and independent of this code, and whose BM25 baselines are published per
 dataset.
 
-| Dataset    | Documents | Queries | nDCG@10 | Published BEIR BM25 |
-| ---------- | --------- | ------- | ------- | ------------------- |
-| SciFact    | 5,183     | 300     | 0.6845  | 0.665               |
-| TREC-COVID | 171,331   | 50      | 0.6632  | 0.656               |
+| Dataset    | Documents | Queries | BM25   | BM25F  | Published BEIR BM25 |
+| ---------- | --------- | ------- | ------ | ------ | ------------------- |
+| SciFact    | 5,183     | 300     | 0.6845 | 0.6925 | 0.665               |
+| TREC-COVID | 171,331   | 50      | 0.6632 | 0.6853 | 0.656               |
 
-    search evaluate <index> <queries.jsonl> <qrels.tsv>
+All figures are nDCG@10.
+
+    search evaluate [--scorer bm25f] <index> <queries.jsonl> <qrels.tsv>
 
 The engine's nDCG@10 was cross-checked by writing its top 100 per query to a
 run file and scoring that with `pytrec_eval`, the scorer BEIR itself uses:
@@ -125,8 +151,95 @@ Lucene's 33, is worth +0.053 on TREC-COVID because its queries are questions
 ("what is the origin of COVID-19"); the engine already had it. Scoring title
 and abstract as separate fields and combining them the way BEIR's
 Elasticsearch baseline does (`best_fields`, tie breaker 0.5) is worth a
-further +0.073 in the reference, and is what the BM25F weighting below
+further +0.073 in the reference, and is what the BM25F scorer below
 addresses. Anserini's k1=0.9 and b=0.4 lower the score in both.
+
+### BM25F: weighting the title
+
+BM25 over one stream counts a word in a title the same as the same word deep in
+an abstract. `--scorer bm25f` keeps both: each document records where its title
+ends in the token stream and how many indexed terms the title holds, so a
+term's frequency splits by position into title and body. Each part is
+normalized by its own field's length and average, the title part is weighted
+2x, and the sum is saturated once, as BM25F does:
+
+    w(d) = 2 * tf_title / (1 - b + b * len_title / avg_title)
+         +     tf_body  / (1 - b + b * len_body  / avg_body)
+    score(d) = sum over terms of idf * w(d) / (k1 + w(d))
+
+The weight was chosen with the Python reference before the engine had a line of
+BM25F in it, sweeping 1, 2, 3 and 5:
+
+| Title weight | TREC-COVID | SciFact |
+| ------------ | ---------- | ------- |
+| 1            | 0.6640     | 0.6852  |
+| 2            | 0.6852     | 0.6899  |
+| 3            | 0.6830     | 0.6938  |
+| 5            | 0.6859     | 0.6924  |
+
+2 and 3 are within noise of each other; 2 was taken. The engine then measured
+0.6853 and 0.6925, agreeing with the reference to within its analyzer
+differences. The weight was picked on the same test queries it is reported on,
+which is a mild optimism; the gain is in both datasets and at every weight
+above 1, which is the part that does not depend on the pick.
+
+Storing the title boundary added one 8-byte table per document to the index
+file (format version 4): 2.2 MB on Simple English Wikipedia, about 1.2%.
+
+## PageRank: measured and rejected as a default
+
+`--pagerank <w>` multiplies the text score by `1 + w * ln(1 + N * pagerank)`.
+N times a page's PageRank is its rank relative to the average page, so a
+weight means the same thing at any graph size, and the factor never drops
+below 1, so link authority reorders matching pages but cannot pull in a page
+that does not match.
+
+**Corpus.** A real crawl of three documentation sites, each with robots.txt
+honoured and a one-second delay between requests:
+
+| Site                         | Prefix           | Pages | Links   |
+| ---------------------------- | ---------------- | ----- | ------- |
+| docs.python.org              | `/3/`            | 595   | 110,960 |
+| www.postgresql.org           | `/docs/current/` | 1,148 | 23,245  |
+| docs.djangoproject.com       | `/en/6.1/`       | 681   | 27,981  |
+| Total, merged into one index |                  | 2,424 | 162,186 |
+
+    search crawl --delay 1000 --max-pages 2000 --max-depth 12 --prefix /3/ \
+        --out corpus/crawl/pydocs https://docs.python.org/3/
+    ./tools/merge_crawls.py corpus/crawl/docs corpus/crawl/pydocs ...
+    search index-write corpus/crawl/docs docs.idx
+
+The Python crawl stopped because its frontier ran out: 595 pages is all of
+`/3/` that links reach from the root.
+
+**Measurement.** A crawl has no relevance judgements, so the test is known-item
+search with targets chosen mechanically rather than by hand: each page whose
+title is unique gives one query, the title without the site's boilerplate
+(the json module's page gives "json JSON encoder and decoder", PostgreSQL's gives "CREATE TABLE"),
+and the right answer is that page. 2,338 queries.
+
+| Scorer | PageRank weight | MRR@10 | Success@1 |
+| ------ | --------------- | ------ | --------- |
+| BM25   | 0               | 0.8740 | 0.8058    |
+| BM25   | 0.05            | 0.8299 | 0.7374    |
+| BM25   | 0.1             | 0.7855 | 0.6779    |
+| BM25   | 0.25            | 0.6598 | 0.5081    |
+| BM25   | 0.5             | 0.4326 | 0.1527    |
+| BM25F  | 0               | 0.8879 | 0.8251    |
+| BM25F  | 0.1             | 0.7987 | 0.6963    |
+
+**Every weight is worse than none.** The highest PageRank pages in the Python
+crawl are the module index, the general index, the copyright page and the bug
+report page: the pages in every page's navigation bar. Within one site,
+PageRank measures the template, not the content. Removing the links that more
+than 20% of pages share was tried on the Python crawl; the best result was a
+tie with plain BM25 (MRR@10 0.8667 against 0.8670), never a gain.
+
+PageRank earns its keep across a web of independent sites, where a link is one
+author vouching for another. Three documentation trees that link only to
+themselves are not that, and a few thousand pages cannot be. So the flag stays,
+the default weight is 0, and BM25F's title weighting does what PageRank was
+hoped to: +0.014 MRR@10.
 
 ## Skip pointers: measured and rejected
 

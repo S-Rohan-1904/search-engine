@@ -52,12 +52,24 @@ file — pass the corpus and it will just answer slowly by rebuilding first.
 
 ```bash
 ./build/search query --snippet <index.idx> 'solar system'
-./build/search repl <index.idx>
+./build/search query --scorer bm25f <index.idx> 'solar system'   # title-weighted
+./build/search query --pagerank 0.1 <crawl.idx> 'create table'     # link authority
+./build/search repl <index.idx>      # :scorer, :pagerank, :complete, did-you-mean
+./build/search serve --port 8080 <index.idx>   # http://127.0.0.1:8080/
+```
+
+## Crawl
+
+```bash
+./build/search crawl --delay 1000 --max-pages 2000 --prefix /3/ \
+    --out corpus/crawl/pydocs https://docs.python.org/3/
+./tools/merge_crawls.py corpus/crawl/docs corpus/crawl/pydocs corpus/crawl/postgres
+./build/search index-write corpus/crawl/docs docs.idx   # also writes .pagerank and .urls
 ```
 
 ## Relevance (BEIR)
 
 ```bash
 ./build/search beir-import <corpus.jsonl> <out.corpus>
-./build/search evaluate <index.idx> <queries.jsonl> <qrels.tsv>
+./build/search evaluate [--scorer bm25f] <index.idx> <queries.jsonl> <qrels.tsv>
 ```

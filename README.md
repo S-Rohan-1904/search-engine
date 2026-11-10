@@ -4,15 +4,15 @@ A search engine written from scratch in C++20 — crawler, indexer, ranker and
 query language — with no search library underneath it. No Lucene, no Elastic,
 no third-party index. The standard library, and libcurl for HTTP.
 
-It indexes 278,214 Wikipedia documents in 16 seconds, answers a query in 4 ms,
-and scores 0.6714 nDCG@10 on a public benchmark against a published Lucene
-baseline of 0.665.
+It indexes 278,214 Wikipedia documents in 9 seconds, answers a query in 1.4 ms,
+and beats the published BM25 baselines on two public benchmarks: 0.6853 nDCG@10
+on TREC-COVID against 0.656, and 0.6925 on SciFact against 0.665.
 
 ```console
 $ search wiki-import simplewiki.json.gz simplewiki.corpus
 $ search index-write --threads 8 simplewiki.corpus simplewiki.idx
 $ search query --snippet simplewiki.idx 'solar system'
-1. doc_00015284  16.1311
+1. doc_00015284  15.9926
    ...Renewable energy Renewable resource [Solar] power "[Solar] [systems]
    projects"...
 ```
@@ -24,16 +24,16 @@ Full table, with the command that reproduces each figure, in
 
 | | |
 |---|---|
-| Corpus | 278,214 docs, 1,443,435 terms, 25,643,127 postings |
-| Index build | 15.9 s on 8 threads, 15,435 docs/s |
-| Index size | 188 MB, 5.46x smaller than uncompressed |
-| Startup | 50 ms, whole process, memory-mapped index |
-| Query latency | p50 4.09 ms, p95 33.8 ms, p99 44.5 ms |
-| With snippets | p50 6.43 ms, p95 42.3 ms |
-| Memory, serving | 101 MB |
-| Memory, building | 0.72–2.92 GB, set by block size |
-| Relevance | nDCG@10 0.6714 on BEIR SciFact (Lucene BM25: 0.665) |
-| Tests | 872 checks, zero warnings under `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion` |
+| Corpus | 278,214 docs, 1,204,562 terms, 26,162,711 postings |
+| Index build | 8.7 s on 8 threads, 31,883 docs/s |
+| Index size | 186 MB, 5.59x smaller than uncompressed |
+| Startup | 35 ms, whole process, memory-mapped index |
+| Query latency | p50 1.35 ms, p95 12.0 ms, p99 17.1 ms, 327 queries/s |
+| With snippets | p50 2.64 ms, p95 14.0 ms |
+| Memory, serving | 97 MB |
+| Memory, building | 1.06 GB in blocks, 3.12 GB in memory |
+| Relevance | nDCG@10 0.6853 TREC-COVID, 0.6925 SciFact (BEIR BM25: 0.656, 0.665) |
+| Tests | 915 checks, zero warnings under `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion` |
 
 ## What it does
 
@@ -50,16 +50,19 @@ re-analyze only documents whose content hash changed.
 lexed and parsed into a boolean tree, evaluated over postings lists. Phrase
 matching uses the stored token positions.
 
-**Ranking.** TF-IDF and BM25, scored in parallel across document shards.
-PageRank over the crawled link graph.
+**Ranking.** TF-IDF, BM25, and BM25F with title matches weighted over body
+matches, scored in parallel across document shards. PageRank over the crawled
+link graph, available as a multiplier on the text score.
 
 **Crawler.** robots.txt parsing, a BFS frontier with URL normalization and
-deduplication, HTML-to-text extraction, rate limiting, and content-hash
-duplicate detection.
+deduplication, path-prefix scoping, HTML-to-text extraction, rate limiting, and
+content-hash duplicate detection. Run for real against three documentation
+sites: 2,424 pages and 162,186 links.
 
 **On top of that.** Snippet generation with query terms highlighted, spelling
-correction via a BK-tree over Levenshtein distance, trie autocomplete, and an
-interactive REPL.
+correction via a BK-tree over Levenshtein distance ("did you mean"), trie
+autocomplete, an interactive REPL, and `search serve`, a small HTTP front end
+with a search page and a JSON API.
 
 ## The parts worth reading
 
@@ -84,7 +87,7 @@ size**, which is what makes the two interchangeable.
 a 30-document test corpus. One made indexing 39 billion string comparisons; one
 made a single query O(postings × documents) by re-summing every document length
 inside the BM25 inner loop. Ten queries ran past ten minutes. They are the
-reason the build is 15.9 s and the query is 4 ms.
+reason the build takes seconds and the query milliseconds.
 
 **Skip pointers, measured and rejected.** Galloping search in postings
 intersection — the textbook optimisation — made intersection-heavy queries
@@ -100,12 +103,21 @@ come with published BM25 baselines.
 
 | Dataset | Documents | Queries | nDCG@10 | Published BEIR BM25 |
 |---|---|---|---|---|
-| SciFact | 5,183 | 300 | 0.6714 | 0.665 |
-| TREC-COVID | 171,331 | 50 | 0.3034 | 0.656 |
+| SciFact | 5,183 | 300 | 0.6925 | 0.665 |
+| TREC-COVID | 171,331 | 50 | 0.6853 | 0.656 |
 
-SciFact matches. TREC-COVID does not, and the reason is not yet known — the
-BM25 parameters have been ruled out. The gap is documented rather than omitted,
-and the claim made here is the narrow one it supports.
+Both with `--scorer bm25f`. TREC-COVID first measured 0.3034. Finding out why
+took an independent BM25 in Python to show the gap was in this engine, then one
+suspect changed at a time: the benchmark's queries were split differently from
+the documents, so "COVID-19" never matched; hyphenated terms like `sars-cov-2`
+were kept whole; and nDCG used exponential gain where `trec_eval` uses linear.
+The engine's own nDCG agrees with `pytrec_eval` on its run file to four
+places. The whole account is in [BENCHMARKS.md](BENCHMARKS.md).
+
+**PageRank, measured and rejected as a default.** On the 2,424-page crawl,
+2,338 known-item queries, every PageRank weight lowered MRR@10 (0.874 to 0.786
+at a weight of 0.1). Within a site the top-ranked pages are the indexes and the
+copyright page in every navigation bar. The flag stays; the default is off.
 
 ## Building
 
@@ -115,7 +127,7 @@ the crawler uses it.
 ```console
 $ cmake -S . -B build && cmake --build build -j
 $ python3 tests/runner.py
-All 872 checks passing.
+All 915 checks passing.
 ```
 
 Tests are end-to-end: each case runs the real binary and compares its output,
@@ -146,6 +158,7 @@ search evaluate <index> <queries> <qrels>          nDCG@10, P@10, recall@100
 search bench build|query <source> [...]            measure it yourself
 search index-size <source>                         compression breakdown
 search crawl <url> [...]                           fetch a site into a corpus
+search serve [--port n] <source>                   search from a browser
 search wiki-import <dump> <file>                   corpus from a Wikipedia dump
 search beir-import <corpus.jsonl> <file>           corpus from a BEIR dataset
 ```
