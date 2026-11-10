@@ -13,7 +13,7 @@
 
 std::optional<std::vector<QueryResult>> run_query(
     const InvertedIndex& index, const CorpusReader* corpus, std::string_view query,
-    const QueryOptions& options, std::string& error) {
+    const QueryOptions& options, std::string& error, const PageRankPrior* prior) {
     error.clear();
 
     const ParseResult parsed = parse_query(query);
@@ -50,7 +50,11 @@ std::optional<std::vector<QueryResult>> run_query(
     ranking.reserve(matches.size());
     for (const std::size_t doc_id : matches) {
         const auto found = scored.find(doc_id);
-        ranking.push_back(ScoredDocument{doc_id, found == scored.end() ? 0.0 : found->second});
+        double total = found == scored.end() ? 0.0 : found->second;
+        if (prior != nullptr && options.pagerank_weight > 0.0) {
+            total *= prior->boost(doc_id, options.pagerank_weight);
+        }
+        ranking.push_back(ScoredDocument{doc_id, total});
     }
 
     const std::vector<ScoredDocument> best = top_k(ranking, options.limit);

@@ -53,6 +53,7 @@ add_executable(search
   src/suggest.cpp
   src/complete.cpp
   src/pagerank.cpp
+  src/prior.cpp
   src/results.cpp
   src/bench.cpp
   src/corpus_file.cpp

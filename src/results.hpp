@@ -10,6 +10,7 @@
 
 #include "corpus.hpp"
 #include "index.hpp"
+#include "prior.hpp"
 #include "ranking.hpp"
 
 // How a search should be run and shown.
@@ -19,6 +20,7 @@ struct QueryOptions {
     bool snippets = false;
     std::size_t snippet_chars = 160;
     bool tsv = false;
+    double pagerank_weight = 0.0;
 
     // Where snippets are cut from, when it is not the source being queried.
     // An index file holds no document text, so querying one needs to be told,
@@ -48,7 +50,7 @@ struct QueryResult {
 // Returns nullopt with `error` set when the query does not parse.
 std::optional<std::vector<QueryResult>> run_query(
     const InvertedIndex& index, const CorpusReader* corpus, std::string_view query,
-    const QueryOptions& options, std::string& error);
+    const QueryOptions& options, std::string& error, const PageRankPrior* prior = nullptr);
 
 // Writes results in the chosen format.
 //

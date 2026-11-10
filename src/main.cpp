@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <iostream>
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <iterator>
 #include <sstream>
@@ -30,6 +31,7 @@
 #include "index_io.hpp"
 #include "normalize.hpp"
 #include "pagerank.hpp"
+#include "prior.hpp"
 #include "query.hpp"
 #include "robots.hpp"
 #include "snippet.hpp"
@@ -85,6 +87,7 @@ int usage() {
                  "      --corpus <path>          where to read snippet text from\n"
                  "      --max-chars <n>          how long an excerpt may be\n"
                  "      --tsv                    id and score, tab separated\n"
+                 "      --pagerank <weight>      scale scores by link authority\n"
                  "  repl [options] <source>      read queries until end of input\n"
                  "  bench build <source>         measure index construction\n"
                  "  bench query <source> <query_file>\n"
@@ -462,6 +465,19 @@ bool take_query_options(std::vector<std::string>& args, QueryOptions& options) {
             }
         } else if (flag == "--corpus") {
             options.corpus = value;
+        } else if (flag == "--pagerank") {
+            try {
+                std::size_t consumed = 0;
+                options.pagerank_weight = std::stod(value, &consumed);
+                if (consumed != value.size() || !std::isfinite(options.pagerank_weight) ||
+                    options.pagerank_weight < 0.0) {
+                    throw std::invalid_argument("pagerank");
+                }
+            } catch (const std::exception&) {
+                std::cerr << "search: pagerank weight must be a non-negative number: " << value
+                          << "\n";
+                return false;
+            }
         } else if (flag == "--scorer") {
             if (value == "bm25") {
                 options.scorer = Scorer::Bm25;
@@ -525,6 +541,52 @@ std::unique_ptr<CorpusReader> open_snippet_corpus(const std::string& source,
 
     std::string error;
     return open_corpus(*path, error);
+}
+
+std::optional<std::filesystem::path> links_beside(const std::string& source) {
+    std::error_code ec;
+    const std::filesystem::path links = std::filesystem::path(source) / "links.tsv";
+    if (std::filesystem::is_directory(source, ec) &&
+        std::filesystem::is_regular_file(links, ec)) {
+        return links;
+    }
+    return std::nullopt;
+}
+
+std::optional<PageRankPrior> open_prior(const std::string& source, const InvertedIndex& index,
+                                        std::string& error) {
+    if (const std::optional<std::filesystem::path> links = links_beside(source)) {
+        std::vector<std::pair<std::string, std::string>> edges;
+        if (!read_links(*links, edges, error)) {
+            return std::nullopt;
+        }
+        return PageRankPrior(pagerank(edges, 30, 0.85), index);
+    }
+
+    std::error_code ec;
+    const std::filesystem::path beside(source + ".pagerank");
+    if (!std::filesystem::is_regular_file(beside, ec)) {
+        error = "no PageRank for " + source + ": expected " + beside.string() +
+                " or a crawl directory with links.tsv";
+        return std::nullopt;
+    }
+    return PageRankPrior::load(beside, index, error);
+}
+
+bool persist_pagerank(const std::string& source, const std::string& index_file) {
+    const std::optional<std::filesystem::path> links = links_beside(source);
+    if (!links.has_value()) {
+        return true;
+    }
+
+    std::vector<std::pair<std::string, std::string>> edges;
+    std::string error;
+    if (!read_links(*links, edges, error) ||
+        !write_pagerank_file(index_file + ".pagerank", pagerank(edges, 30, 0.85), error)) {
+        std::cerr << "search: " << error << "\n";
+        return false;
+    }
+    return true;
 }
 
 int cmd_wiki_import(const std::vector<std::string>& args) {
@@ -698,7 +760,7 @@ int cmd_index_build(const std::vector<std::string>& args) {
               << "terms " << report.terms << "\n"
               << "postings " << report.postings << "\n"
               << "blocks " << report.blocks << "\n";
-    return 0;
+    return persist_pagerank(rest[0], rest[1]) ? 0 : 1;
 }
 
 int cmd_bench(const std::vector<std::string>& args) {
@@ -864,9 +926,18 @@ int cmd_query(const std::vector<std::string>& args) {
     }
 
     std::string error;
+    std::optional<PageRankPrior> prior;
+    if (options.pagerank_weight > 0.0) {
+        prior = open_prior(rest[0], *opened, error);
+        if (!prior.has_value()) {
+            std::cerr << "search: " << error << "\n";
+            return 1;
+        }
+    }
+
     const std::optional<std::vector<QueryResult>> results =
         run_query(*opened, open_snippet_corpus(rest[0], options, options.snippets).get(), rest[1],
-                  options, error);
+                  options, error, prior.has_value() ? &*prior : nullptr);
     if (!results.has_value()) {
         std::cerr << "search: " << error << "\n";
         return 1;
@@ -891,6 +962,7 @@ int repl_meta_command(const std::string& line, QueryOptions& options, bool& quit
                      ":limit <n>      how many results to show\n"
                      ":scorer <name>  bm25 or tfidf\n"
                      ":snippet <on|off>\n"
+                     ":pagerank <w>   weight of link authority, 0 is off\n"
                      ":settings       show the current settings\n"
                      ":quit\n";
         return 0;
@@ -898,7 +970,8 @@ int repl_meta_command(const std::string& line, QueryOptions& options, bool& quit
     if (name == ":settings") {
         std::cout << "limit " << options.limit << "\n"
                   << "scorer " << (options.scorer == Scorer::Bm25 ? "bm25" : "tfidf") << "\n"
-                  << "snippet " << (options.snippets ? "on" : "off") << "\n";
+                  << "snippet " << (options.snippets ? "on" : "off") << "\n"
+                  << "pagerank " << std::defaultfloat << options.pagerank_weight << "\n";
         return 0;
     }
     if (name == ":limit") {
@@ -914,6 +987,19 @@ int repl_meta_command(const std::string& line, QueryOptions& options, bool& quit
             options.scorer = Scorer::TfIdf;
         } else {
             std::cout << "scorer must be bm25 or tfidf\n";
+        }
+        return 0;
+    }
+    if (name == ":pagerank") {
+        try {
+            std::size_t consumed = 0;
+            const double weight = std::stod(value, &consumed);
+            if (consumed != value.size() || !std::isfinite(weight) || weight < 0.0) {
+                throw std::invalid_argument("pagerank");
+            }
+            options.pagerank_weight = weight;
+        } catch (const std::exception&) {
+            std::cout << "pagerank must be a non-negative number\n";
         }
         return 0;
     }
@@ -950,6 +1036,14 @@ int cmd_repl(const std::vector<std::string>& args) {
     // The REPL can turn snippets on later with :snippet, so the corpus is
     // opened up front rather than at the first query that needs it.
     const std::unique_ptr<CorpusReader> corpus = open_snippet_corpus(rest[0], options, true);
+
+    std::string prior_error;
+    const std::optional<PageRankPrior> prior = open_prior(rest[0], *opened, prior_error);
+    if (!prior.has_value() && options.pagerank_weight > 0.0) {
+        std::cerr << "search: " << prior_error << "\n";
+        return 1;
+    }
+
     const bool interactive = isatty(STDIN_FILENO) != 0;
 
     std::string line;
@@ -979,7 +1073,8 @@ int cmd_repl(const std::vector<std::string>& args) {
 
         std::string error;
         const std::optional<std::vector<QueryResult>> results =
-            run_query(*opened, corpus.get(), line, options, error);
+            run_query(*opened, corpus.get(), line, options, error,
+                      prior.has_value() ? &*prior : nullptr);
         if (!results.has_value()) {
             std::cout << "error: " << error << "\n";
             continue;
@@ -1075,26 +1170,11 @@ int cmd_pagerank(const std::vector<std::string>& args) {
         return usage();
     }
 
-    std::string text;
-    if (!read_text_file(rest[0], text)) {
-        return 1;
-    }
-
     std::vector<std::pair<std::string, std::string>> links;
-    std::size_t line_start = 0;
-    while (line_start < text.size()) {
-        const std::size_t line_end = text.find('\n', line_start);
-        const std::string line =
-            text.substr(line_start, line_end == std::string::npos ? std::string::npos
-                                                                  : line_end - line_start);
-        const std::size_t tab = line.find('\t');
-        if (tab != std::string::npos) {
-            links.emplace_back(line.substr(0, tab), line.substr(tab + 1));
-        }
-        if (line_end == std::string::npos) {
-            break;
-        }
-        line_start = line_end + 1;
+    std::string error;
+    if (!read_links(rest[0], links, error)) {
+        std::cerr << "search: " << error << "\n";
+        return 1;
     }
 
     std::cout << std::fixed << std::setprecision(6);
@@ -1488,7 +1568,7 @@ int cmd_index_write(const std::vector<std::string>& args) {
         std::cerr << "search: " << error << "\n";
         return 1;
     }
-    return 0;
+    return persist_pagerank(rest[0], rest[1]) ? 0 : 1;
 }
 
 int cmd_index_size(const std::vector<std::string>& args) {
