@@ -1,0 +1,3 @@
+title: Language notes
+
+Rust appears in this body, and rust appears again further on.
