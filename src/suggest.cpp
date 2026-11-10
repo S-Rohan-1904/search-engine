@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <utility>
 
+#include "analyzer.hpp"
 #include "edit_distance.hpp"
+#include "query.hpp"
 
 void BkTree::insert(std::string term, std::size_t document_frequency) {
     if (!root_) {
@@ -85,4 +87,77 @@ BkTree build_bk_tree(const InvertedIndex& index) {
         tree.insert(term, index.document_frequency(term));
     }
     return tree;
+}
+
+namespace {
+
+std::optional<std::string> correct_word(const std::string& word, const InvertedIndex& index,
+                                        const BkTree& tree) {
+    const std::vector<Token> analyzed = analyze(word);
+    if (analyzed.size() != 1 || index.document_frequency(analyzed.front().text) != 0) {
+        return std::nullopt;
+    }
+
+    const std::string& term = analyzed.front().text;
+    const std::size_t max_distance = term.size() <= 4 ? 1 : 2;
+    for (const Suggestion& suggestion : tree.search(term, max_distance, 5)) {
+        const std::vector<Token> again = analyze(suggestion.term);
+        if (again.size() == 1 && again.front().text == suggestion.term) {
+            return suggestion.term;
+        }
+    }
+    return std::nullopt;
+}
+
+std::string spell(const QueryToken& token) {
+    switch (token.kind) {
+        case QueryTokenKind::Term:
+            return token.text;
+        case QueryTokenKind::Phrase:
+            return "\"" + token.text + "\"";
+        case QueryTokenKind::And:
+            return "AND";
+        case QueryTokenKind::Or:
+            return "OR";
+        case QueryTokenKind::Not:
+            return "NOT";
+        case QueryTokenKind::LParen:
+            return "(";
+        case QueryTokenKind::RParen:
+            return ")";
+    }
+    return "";
+}
+
+}
+
+std::optional<std::string> correct_query(std::string_view query, const InvertedIndex& index,
+                                         const BkTree& tree) {
+    std::vector<QueryToken> tokens;
+    std::string error;
+    if (!lex_query(query, tokens, error)) {
+        return std::nullopt;
+    }
+
+    bool changed = false;
+    std::string corrected;
+    for (QueryToken& token : tokens) {
+        if (token.kind == QueryTokenKind::Term) {
+            if (const std::optional<std::string> better = correct_word(token.text, index, tree)) {
+                token.text = *better;
+                changed = true;
+            }
+        }
+
+        const std::string text = spell(token);
+        if (!corrected.empty() && corrected.back() != '(' && text != ")") {
+            corrected.push_back(' ');
+        }
+        corrected += text;
+    }
+
+    if (!changed) {
+        return std::nullopt;
+    }
+    return corrected;
 }

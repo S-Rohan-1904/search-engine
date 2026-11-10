@@ -62,7 +62,7 @@ CASES = [
         "name": "help lists the commands",
         "argv": ["repl", "corpus/fixtures"],
         "stdin": ":help\n",
-        "stdout": "queries use AND, OR, NOT, parentheses and \"phrases\"\n:limit <n>      how many results to show\n:scorer <name>  bm25 or tfidf\n:snippet <on|off>\n:pagerank <w>   weight of link authority, 0 is off\n:settings       show the current settings\n:quit",
+        "stdout": "queries use AND, OR, NOT, parentheses and \"phrases\"\n:limit <n>      how many results to show\n:scorer <name>  bm25 or tfidf\n:snippet <on|off>\n:pagerank <w>   weight of link authority, 0 is off\n:complete <p>   indexed terms beginning with a prefix\n:settings       show the current settings\n:quit",
     },
     {
         "name": "quit ends the session early",
@@ -134,6 +134,42 @@ CASES = [
         "argv": ["repl", "--bogus", "1", "corpus/fixtures"],
         "exit_code": 1,
         "stderr_not_empty": True,
+    },
+    {
+        "name": "a misspelled word gets a suggestion",
+        "argv": ["repl", "corpus/fixtures"],
+        "stdin": "plnet\n",
+        "stdout": "did you mean: planet",
+    },
+    {
+        "name": "only the unknown word is corrected",
+        "argv": ["repl", "corpus/fixtures"],
+        "stdin": "solar systm\n",
+        "stdout": "did you mean: solar system",
+    },
+    {
+        "name": "operators and parentheses survive the correction",
+        "argv": ["repl", "--limit", "2", "corpus/fixtures"],
+        "stdin": "(plnet OR cats)\n",
+        "stdout": "did you mean: (planet OR cats)\n1. doc_003  2.5076\n2. doc_001  2.3900",
+    },
+    {
+        "name": "a query whose words are all indexed gets no suggestion",
+        "argv": ["repl", "--limit", "1", "corpus/fixtures"],
+        "stdin": "planet\n",
+        "stdout": "1. doc_026  2.3390",
+    },
+    {
+        "name": "tsv output stays machine-readable",
+        "argv": ["repl", "--tsv", "corpus/fixtures"],
+        "stdin": "plnet\n",
+        "stdout": "",
+    },
+    {
+        "name": "completions come from the indexed terms",
+        "argv": ["repl", "corpus/fixtures"],
+        "stdin": ":complete pla\n",
+        "stdout": "planet 3\nplan 1",
     },
     {
         "name": "repl with no source is rejected",

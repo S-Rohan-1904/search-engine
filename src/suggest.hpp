@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -52,3 +53,6 @@ private:
 
 // Builds a BK-tree over every term in an index.
 BkTree build_bk_tree(const InvertedIndex& index);
+
+std::optional<std::string> correct_query(std::string_view query, const InvertedIndex& index,
+                                         const BkTree& tree);
