@@ -124,7 +124,9 @@ navigational queries by 0.035 and lowered lookups of a particular article by
 crawl of 1,096 sites, ranking sites instead of pages (`--pagerank-graph site`)
 raised homepage finding from 0.565 to 0.775, and applying it only to one- and
 two-word queries (`--pagerank-max-words 2`) kept two thirds of that gain while
-cutting the cost to 0.004.
+cutting the cost to 0.004. A control then gave every home page the same boost,
+with no links at all: that reached 0.851, so most of the site-level gain is
+preferring home pages, and the links add 0.02 to 0.03 over chance.
 
 ## Building
 

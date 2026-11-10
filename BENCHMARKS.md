@@ -385,17 +385,57 @@ otherwise:
 A rule that treats a query as navigational when it names a crawled site was
 also tried and does not work: 1,758 of 2,387 page titles name their own site.
 
-**The answer.** Both, in different parts:
+**4. The control: is it links, or home pages?** Site-level PageRank gives
+its score only to home pages, and every answer in the homepage set is a home
+page. A prior could win there by preferring home pages without reading a single
+link (Kraaij, Westerveld and Hiemstra made the same point about entry-page
+search in 2002). Two controls, run through the engine by replacing the
+`.siterank` beside the index:
+
+- **flat**: every one of the 557 home pages gets the same score, so each gets
+  the same boost and no link is used;
+- **shuffled**: the real site-level scores, dealt out to home pages at random
+  (5 shuffles), which keeps how unequal the boosts are but not which site
+  earned which.
+
+| Prior (BM25)              | Weight | Home page                  | Title lookup |
+| ------------------------- | ------ | -------------------------- | ------------ |
+| Site-level PageRank       | 0.25   | +0.211 (+0.159, +0.260)    | -0.077       |
+| Shuffled site-level       | 0.25   | +0.173 to +0.190           |              |
+| Flat home-page boost      | 0.1    | +0.228 (+0.181, +0.277)    |              |
+| Flat home-page boost      | 0.25   | +0.286 (+0.234, +0.340)    | -0.081       |
+| Flat home-page boost      | 0.5    | +0.321 (+0.264, +0.376)    | -0.139       |
+
+"Short only" is `--pagerank-max-words 2`.
+
+| Prior (BM25), short only  | Weight | Home page                  | Title lookup |
+| ------------------------- | ------ | -------------------------- | ------------ |
+| Site-level PageRank       | 0.25   | +0.139                     | -0.004       |
+| Flat home-page boost      | 0.25   | +0.172 (+0.124, +0.223)    | -0.003       |
+
+On BM25F at weight 0.25 it is the same: +0.196 for site-level PageRank, +0.167
+to +0.192 shuffled, +0.262 flat. The flat boost made no homepage query worse
+(77 better, 0 worse); site-level PageRank made 3 worse.
+
+So most of the +0.21 is "prefer home pages". A flat boost beats site-level
+PageRank at every weight for about the same cost on title lookup, with routing
+and without. The links are worth something on top of that: the real scores
+beat every one of the 5 shuffles of the same scores, by +0.029 on BM25 and
++0.018 on BM25F on average. That is the part of the gain that is link
+analysis.
+
+**The answer.** Three parts:
 
 - Lowering lookups of a particular page is PageRank's. It holds on every
   graph, every construction and every weight above 0.05, because a
   query-independent prior favours popular pages whatever was asked.
-- The size of the navigational gain was the crawl's, and the graph
-  construction's. Page-level PageRank on a 3,000-page crawl gave +0.07 with a
-  wide interval; Wikipedia's 12.6 million links give a tight +0.035; ranking
-  sites instead of pages gives +0.21 on the crawl.
-- What to do follows: compute it per site, and apply it to short queries. That
-  keeps two thirds or more of the gain and nearly none of the cost.
+- The navigational gain depended on the crawl and the graph construction:
+  +0.07 with a wide interval from page-level PageRank on a 3,000-page crawl,
+  a tight +0.035 from Wikipedia's 12.6 million links.
+- On the crawl, most of the site-level gain is not link analysis. Telling the
+  ranker which pages are home pages does better than PageRank does; which site
+  the links favour adds +0.02 to +0.03 over chance. Applying any such prior only
+  to short queries keeps most of the gain and nearly none of the cost.
 
 Site-level PageRank is now part of the engine: `index-write` keeps a
 `.siterank` beside the `.pagerank`, and `--pagerank-graph site` ranks with it.
