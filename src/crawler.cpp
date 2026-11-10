@@ -82,39 +82,47 @@ std::string document_name(std::size_t ordinal) {
     return name.str();
 }
 
-void write_links(const std::filesystem::path& directory,
-                 const std::unordered_map<std::string, std::size_t>& document_of,
-                 const std::vector<std::pair<std::size_t, std::string>>& links) {
-    std::ofstream out(directory / "links.tsv");
-    if (!out) {
-        return;
-    }
+class LinkGraphWriter {
+public:
+    explicit LinkGraphWriter(const std::filesystem::path& directory)
+        : links_(directory / "links.tsv", std::ios::trunc),
+          urls_(directory / "urls.tsv", std::ios::trunc) {}
 
-    for (const auto& [from, target] : links) {
-        const auto to = document_of.find(target);
-        if (to != document_of.end()) {
-            out << document_name(from) << "\t" << document_name(to->second) << "\n";
+    void add(std::size_t ordinal, const std::string& url, const std::vector<std::string>& targets) {
+        document_of_.emplace(url, ordinal);
+        urls_ << document_name(ordinal) << "\t" << url << "\n";
+
+        for (const std::string& target : targets) {
+            const auto known = document_of_.find(target);
+            if (known != document_of_.end()) {
+                edge(ordinal, known->second);
+            } else {
+                waiting_[target].push_back(ordinal);
+            }
         }
-    }
-}
 
-void write_urls(const std::filesystem::path& directory,
-                const std::unordered_map<std::string, std::size_t>& document_of) {
-    std::vector<std::pair<std::size_t, std::string>> rows;
-    rows.reserve(document_of.size());
-    for (const auto& [url, ordinal] : document_of) {
-        rows.emplace_back(ordinal, url);
-    }
-    std::sort(rows.begin(), rows.end());
+        const auto waiting = waiting_.find(url);
+        if (waiting != waiting_.end()) {
+            for (const std::size_t from : waiting->second) {
+                edge(from, ordinal);
+            }
+            waiting_.erase(waiting);
+        }
 
-    std::ofstream out(directory / "urls.tsv");
-    if (!out) {
-        return;
+        links_.flush();
+        urls_.flush();
     }
-    for (const auto& [ordinal, url] : rows) {
-        out << document_name(ordinal) << "\t" << url << "\n";
+
+private:
+    void edge(std::size_t from, std::size_t to) {
+        links_ << document_name(from) << "\t" << document_name(to) << "\n";
     }
-}
+
+    std::ofstream links_;
+    std::ofstream urls_;
+    std::unordered_map<std::string, std::size_t> document_of_;
+    std::unordered_map<std::string, std::vector<std::size_t>> waiting_;
+};
 
 void write_page(const std::filesystem::path& directory, std::size_t ordinal,
                 const CrawledPage& page) {
@@ -140,14 +148,14 @@ std::vector<CrawledPage> crawl(const Url& seed, Fetcher& fetcher, const CrawlOpt
     Frontier frontier(options.max_depth, options.max_pages);
     std::unordered_map<std::string, RobotsRules> robots;
     std::set<std::pair<std::uint64_t, std::size_t>> fingerprints;
-    std::unordered_map<std::string, std::size_t> document_of;
-    std::vector<std::pair<std::size_t, std::string>> link_pairs;
     HostRateLimiter limiter;
     std::vector<CrawledPage> pages;
 
+    std::optional<LinkGraphWriter> graph;
     if (options.output_dir.has_value()) {
         std::error_code ec;
         std::filesystem::create_directories(*options.output_dir, ec);
+        graph.emplace(*options.output_dir);
     }
 
     std::unordered_map<std::string, std::size_t> queued_per_host;
@@ -213,16 +221,8 @@ std::vector<CrawledPage> crawl(const Url& seed, Fetcher& fetcher, const CrawlOpt
         if (options.output_dir.has_value() && result->status == 200) {
             const std::size_t ordinal = pages.size();
             write_page(*options.output_dir, ordinal, pages.back());
-            document_of[pages.back().url] = ordinal;
-            for (std::string& target : outgoing) {
-                link_pairs.emplace_back(ordinal, std::move(target));
-            }
+            graph->add(ordinal, pages.back().url, outgoing);
         }
-    }
-
-    if (options.output_dir.has_value()) {
-        write_links(*options.output_dir, document_of, link_pairs);
-        write_urls(*options.output_dir, document_of);
     }
 
     return pages;
