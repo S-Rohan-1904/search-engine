@@ -43,10 +43,13 @@ std::vector<Word> mark_words(std::string_view text, const std::vector<std::strin
         word.highlight_end = end;
 
         const std::vector<Token> analyzed = analyze(token.text);
-        if (analyzed.size() == 1 && wanted.count(analyzed.front().text) != 0) {
+        for (const Token& part : analyzed) {
+            if (wanted.count(part.text) == 0) {
+                continue;
+            }
             for (std::size_t i = 0; i < terms.size(); i++) {
-                if (terms[i] == analyzed.front().text) {
-                    word.term_index = i;
+                if (terms[i] == part.text) {
+                    word.term_index = std::min(word.term_index, i);
                     break;
                 }
             }

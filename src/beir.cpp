@@ -9,6 +9,7 @@
 
 #include "corpus_file.hpp"
 #include "jsonl.hpp"
+#include "tokenizer.hpp"
 
 namespace {
 
@@ -113,7 +114,7 @@ bool read_qrels(const std::filesystem::path& path, Qrels& out, std::string& erro
 }
 
 double gain(int graded) {
-    return std::pow(2.0, static_cast<double>(graded)) - 1.0;
+    return static_cast<double>(graded);
 }
 
 double discount(std::size_t rank) {
@@ -145,6 +146,27 @@ double ndcg(const std::vector<QueryResult>& results,
     }
 
     return best > 0.0 ? actual / best : 0.0;
+}
+
+std::string bag_of_words(std::string_view sentence) {
+    std::string expression;
+    for (const Token& token : tokenize(sentence)) {
+        std::string word;
+        for (const char c : token.text) {
+            if (c == '"' || c == '(' || c == ')') {
+                continue;
+            }
+            word.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+        }
+        if (word.empty()) {
+            continue;
+        }
+        if (!expression.empty()) {
+            expression += " OR ";
+        }
+        expression += word;
+    }
+    return expression;
 }
 
 }
@@ -213,23 +235,7 @@ bool evaluate_relevance(const InvertedIndex& index, const std::filesystem::path&
             continue;
         }
 
-        // A benchmark query is a sentence, not a boolean expression, and its
-        // punctuation would be parsed as query syntax. Every word is taken as
-        // an OR term, which is what a bag-of-words BM25 baseline does.
-        std::string terms;
-        for (const char c : *text) {
-            terms.push_back((std::isalnum(static_cast<unsigned char>(c)) != 0) ? c : ' ');
-        }
-
-        std::istringstream words(terms);
-        std::string word;
-        std::string expression;
-        while (words >> word) {
-            if (!expression.empty()) {
-                expression += " OR ";
-            }
-            expression += word;
-        }
+        const std::string expression = bag_of_words(*text);
         if (expression.empty()) {
             report.unjudged++;
             continue;

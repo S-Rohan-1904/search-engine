@@ -79,18 +79,54 @@ dataset.
 
 | Dataset    | Documents | Queries | nDCG@10 | Published BEIR BM25 |
 | ---------- | --------- | ------- | ------- | ------------------- |
-| SciFact    | 5,183     | 300     | 0.6714  | 0.665               |
-| TREC-COVID | 171,331   | 50      | 0.3034  | 0.656               |
+| SciFact    | 5,183     | 300     | 0.6845  | 0.665               |
+| TREC-COVID | 171,331   | 50      | 0.6632  | 0.656               |
 
     search evaluate <index> <queries.jsonl> <qrels.tsv>
 
-SciFact matches the published baseline. **TREC-COVID does not, and the reason
-is not yet known.** The BM25 parameters have been ruled out: running with
-Anserini's k1=0.9 and b=0.4 instead of 1.2 and 0.75 moves TREC-COVID only to
-0.3326 and drops SciFact to 0.6636. Analysis differences on long medical
-abstracts, and the handling of long queries, remain untested.
+The engine's nDCG@10 was cross-checked by writing its top 100 per query to a
+run file and scoring that with `pytrec_eval`, the scorer BEIR itself uses:
+0.6631 against the engine's 0.6632, the difference being how ties are ordered.
 
-The honest claim from this is the narrow one: the BM25 implementation matches a
+### How TREC-COVID went from 0.3034 to 0.6632
+
+TREC-COVID first measured 0.3034, less than half the baseline, while SciFact
+matched. An independent BM25 written in Python (Lucene-style tokenization,
+NLTK's Porter stemmer, the same k1 and b) scored 0.6101 on the same files,
+which put the gap in this engine rather than in BM25. Each suspect was then
+changed on its own and measured:
+
+| Change                                                      | TREC-COVID | SciFact |
+| ----------------------------------------------------------- | ---------- | ------- |
+| Starting point                                              | 0.3034     | 0.6711  |
+| Benchmark queries split on whitespace, as documents are     | 0.5872     | 0.6711  |
+| Hyphens, slashes and Unicode dashes split compounds         | 0.6418     | 0.6845  |
+| nDCG gain is the grade itself, as `trec_eval` computes it   | 0.6632     | 0.6845  |
+
+1. **Query handling.** The evaluator turned every non-alphanumeric byte of a
+   query into a space, so "COVID-19" became the two terms `covid` and `19`,
+   while the documents had indexed the single term `covid-19`. The term that
+   appears in nearly every TREC-COVID query matched nothing. Queries now go
+   through the same whitespace tokenizer as documents.
+2. **Tokenization of medical text.** Keeping hyphenated words whole made
+   `sars-cov-2`, `covid-19` and `2019-ncov` single terms, so a document
+   writing "SARS-CoV-2" never matched a query about "SARS CoV 2" or "CoV", and
+   "ACE2/TMPRSS2" became one term `ace2tmprss2`. The analyzer now splits at
+   hyphens, slashes and the Unicode hyphen and dash characters, the way
+   Lucene's standard tokenizer does. The Python reference predicted this: with
+   compounds kept whole it dropped from 0.6101 to 0.5603.
+3. **The metric.** nDCG used a gain of 2^grade - 1. `trec_eval` and so BEIR
+   use the grade itself. SciFact's grades are all 1, where the two agree,
+   which is why only TREC-COVID moved.
+
+Long-query handling and title-plus-abstract indexing were tested in the Python
+reference rather than assumed. The engine's 153-word stopword list, against
+Lucene's 33, is worth +0.053 on TREC-COVID because its queries are questions
+("what is the origin of COVID-19"); the engine already had it. Scoring title
+and abstract as separate fields and combining them the way BEIR's
+Elasticsearch baseline does (`best_fields`, tie breaker 0.5) is worth a
+further +0.073 in the reference, and is what the BM25F weighting below
+addresses. Anserini's k1=0.9 and b=0.4 lower the score in both.
 
 ## Skip pointers: measured and rejected
 

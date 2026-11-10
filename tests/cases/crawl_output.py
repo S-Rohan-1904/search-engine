@@ -22,7 +22,7 @@ CASES = [
     {
         "name": "the crawl indexes like any other corpus",
         "argv": ["index-stats", "build/crawled"],
-        "stdout": "documents: 5\nterms: 39\npostings: 47",
+        "stdout": "documents: 5\nterms: 40\npostings: 48",
     },
     {
         "name": "boolean queries run against a crawled corpus",
@@ -32,7 +32,7 @@ CASES = [
     {
         "name": "ranking runs against it too",
         "argv": ["bm25", "build/crawled", "planet"],
-        "stdout": "doc_0004 1.6052",
+        "stdout": "doc_0004 1.6135",
     },
     {
         "name": "script and style contents are not indexed",
@@ -57,7 +57,7 @@ CASES = [
     {
         "name": "and the corpus is that small",
         "argv": ["index-stats", "build/crawled-small"],
-        "stdout": "documents: 2\nterms: 26\npostings: 29",
+        "stdout": "documents: 2\nterms: 27\npostings: 30",
     },
     {
         "name": "a bad seed is reported before anything is written",

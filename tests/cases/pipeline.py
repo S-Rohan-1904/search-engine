@@ -25,9 +25,24 @@ CASES = [
         "stdout": "1 4 cat\n4 16 dog\n7 28 bird",
     },
     {
-        "name": "a hyphenated compound survives normalization and stems as one term",
+        "name": "a hyphenated compound splits into its parts, each with its own position",
         "argv": ["analyze", "well-lit laboratories"],
-        "stdout": "0 0 well-lit\n1 9 laboratori",
+        "stdout": "0 0 well\n1 5 lit\n2 9 laboratori",
+    },
+    {
+        "name": "a slash separates terms the way a hyphen does",
+        "argv": ["analyze", "ACE2/TMPRSS2 receptors"],
+        "stdout": "0 0 ace2\n1 5 tmprss2\n2 13 receptor",
+    },
+    {
+        "name": "Unicode hyphens and dashes split a compound too",
+        "argv": ["analyze", "COVID\u201019 \u2013 onset"],
+        "stdout": "0 0 covid\n1 8 19\n2 15 onset",
+    },
+    {
+        "name": "a separator at either end of a word leaves the word whole",
+        "argv": ["analyze", "-leading trailing- a--b"],
+        "stdout": "0 1 lead\n1 9 trail\n3 22 b",
     },
     {
         "name": "punctuation and possessives are stripped before stemming",
