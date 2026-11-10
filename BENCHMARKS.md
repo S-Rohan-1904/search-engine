@@ -397,6 +397,13 @@ also tried and does not work: 1,758 of 2,387 page titles name their own site.
 - What to do follows: compute it per site, and apply it to short queries. That
   keeps two thirds or more of the gain and nearly none of the cost.
 
+Site-level PageRank is now part of the engine: `index-write` keeps a
+`.siterank` beside the `.pagerank`, and `--pagerank-graph site` ranks with it.
+Its scores agree with an independent Python implementation to within 1.3e-15
+relative on all 557 home pages, and rerunning experiment 2 through the engine
+gives the same figures to four places: 0.5645 to 0.7751 on BM25 and 0.6397 to
+0.8353 on BM25F at weight 0.25, and -0.013 on title lookup at weight 0.05.
+
 ## Skip pointers: measured and rejected
 
 Galloping search in postings intersection, the expected optimisation, made

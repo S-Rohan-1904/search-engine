@@ -13,6 +13,12 @@
 #include "prior.hpp"
 #include "ranking.hpp"
 
+// Which link graph the PageRank prior comes from. `Page` ranks every crawled
+// page by the links between pages. `Site` ranks hosts by the links between
+// different hosts and credits each host's score to its home page; see
+// siterank.hpp.
+enum class LinkGraph { Page, Site };
+
 // How a search should be run and shown.
 struct QueryOptions {
     std::size_t limit = 10;
@@ -21,6 +27,7 @@ struct QueryOptions {
     std::size_t snippet_chars = 160;
     bool tsv = false;
     double pagerank_weight = 0.0;
+    LinkGraph pagerank_graph = LinkGraph::Page;
 
     // Where snippets are cut from, when it is not the source being queried.
     // An index file holds no document text, so querying one needs to be told,

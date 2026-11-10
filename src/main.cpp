@@ -32,6 +32,7 @@
 #include "normalize.hpp"
 #include "pagerank.hpp"
 #include "prior.hpp"
+#include "siterank.hpp"
 #include "query.hpp"
 #include "robots.hpp"
 #include "server.hpp"
@@ -90,6 +91,8 @@ int usage() {
                  "      --max-chars <n>          how long an excerpt may be\n"
                  "      --tsv                    id and score, tab separated\n"
                  "      --pagerank <weight>      scale scores by link authority\n"
+                 "      --pagerank-graph page|site\n"
+                 "                               rank pages, or sites credited to home pages\n"
                  "  repl [options] <source>      read queries until end of input\n"
                  "  bench build <source>         measure index construction\n"
                  "  bench query <source> <query_file>\n"
@@ -131,6 +134,7 @@ int usage() {
                  "                               dictionary terms beginning with a prefix\n"
                  "  pagerank [--iterations <n>] [--damping <d>] [--out <file>] <links_file>\n"
                  "                               PageRank over a crawl's link graph\n"
+                 "      --sites <urls_file>      rank sites, credited to their home pages\n"
                  "  url <url>                    normalize a url\n"
                  "  url-resolve <base> <ref>     resolve a link against a base url\n"
                  "  robots <file> <agent> <path> is this path allowed?\n"
@@ -485,6 +489,15 @@ bool take_query_options(std::vector<std::string>& args, QueryOptions& options) {
                           << "\n";
                 return false;
             }
+        } else if (flag == "--pagerank-graph") {
+            if (value == "page") {
+                options.pagerank_graph = LinkGraph::Page;
+            } else if (value == "site") {
+                options.pagerank_graph = LinkGraph::Site;
+            } else {
+                std::cerr << "search: pagerank graph must be page or site: " << value << "\n";
+                return false;
+            }
         } else if (flag == "--scorer") {
             const std::optional<Scorer> scorer = parse_scorer(value);
             if (!scorer.has_value()) {
@@ -558,18 +571,39 @@ std::optional<std::filesystem::path> links_beside(const std::string& source) {
     return std::nullopt;
 }
 
+std::optional<std::vector<RankedPage>> rank_crawl(const std::filesystem::path& links,
+                                                  LinkGraph graph, std::string& error) {
+    std::vector<std::pair<std::string, std::string>> edges;
+    if (!read_links(links, edges, error)) {
+        return std::nullopt;
+    }
+    if (graph == LinkGraph::Page) {
+        return pagerank(edges, 30, 0.85);
+    }
+
+    std::vector<std::pair<std::string, std::string>> urls;
+    if (!read_page_urls(links.parent_path() / "urls.tsv", urls, error)) {
+        return std::nullopt;
+    }
+    return site_pagerank(edges, urls, 30, 0.85);
+}
+
+std::string ranking_suffix(LinkGraph graph) {
+    return graph == LinkGraph::Page ? ".pagerank" : ".siterank";
+}
+
 std::optional<PageRankPrior> open_prior(const std::string& source, const InvertedIndex& index,
-                                        std::string& error) {
+                                        LinkGraph graph, std::string& error) {
     if (const std::optional<std::filesystem::path> links = links_beside(source)) {
-        std::vector<std::pair<std::string, std::string>> edges;
-        if (!read_links(*links, edges, error)) {
+        const std::optional<std::vector<RankedPage>> ranking = rank_crawl(*links, graph, error);
+        if (!ranking.has_value()) {
             return std::nullopt;
         }
-        return PageRankPrior(pagerank(edges, 30, 0.85), index);
+        return PageRankPrior(*ranking, index);
     }
 
     std::error_code ec;
-    const std::filesystem::path beside(source + ".pagerank");
+    const std::filesystem::path beside(source + ranking_suffix(graph));
     if (!std::filesystem::is_regular_file(beside, ec)) {
         error = "no PageRank for " + source + ": expected " + beside.string() +
                 " or a crawl directory with links.tsv";
@@ -584,17 +618,26 @@ bool persist_crawl_sidecars(const std::string& source, const std::string& index_
         return true;
     }
 
-    std::vector<std::pair<std::string, std::string>> edges;
-    std::string error;
-    if (!read_links(*links, edges, error) ||
-        !write_pagerank_file(index_file + ".pagerank", pagerank(edges, 30, 0.85), error)) {
-        std::cerr << "search: " << error << "\n";
-        return false;
-    }
-
     std::error_code ec;
     const std::filesystem::path urls = std::filesystem::path(source) / "urls.tsv";
-    if (std::filesystem::is_regular_file(urls, ec)) {
+    const bool has_urls = std::filesystem::is_regular_file(urls, ec);
+
+    std::vector<LinkGraph> graphs{LinkGraph::Page};
+    if (has_urls) {
+        graphs.push_back(LinkGraph::Site);
+    }
+
+    std::string error;
+    for (const LinkGraph graph : graphs) {
+        const std::optional<std::vector<RankedPage>> ranking = rank_crawl(*links, graph, error);
+        if (!ranking.has_value() ||
+            !write_pagerank_file(index_file + ranking_suffix(graph), *ranking, error)) {
+            std::cerr << "search: " << error << "\n";
+            return false;
+        }
+    }
+
+    if (has_urls) {
         std::filesystem::copy_file(urls, index_file + ".urls",
                                    std::filesystem::copy_options::overwrite_existing, ec);
         if (ec) {
@@ -636,7 +679,8 @@ int cmd_serve(const std::vector<std::string>& args) {
     }
 
     std::string error;
-    const std::optional<PageRankPrior> prior = open_prior(rest[0], *opened, error);
+    const std::optional<PageRankPrior> prior =
+        open_prior(rest[0], *opened, options.pagerank_graph, error);
     if (!prior.has_value() && options.pagerank_weight > 0.0) {
         std::cerr << "search: " << error << "\n";
         return 1;
@@ -1011,7 +1055,7 @@ int cmd_query(const std::vector<std::string>& args) {
     std::string error;
     std::optional<PageRankPrior> prior;
     if (options.pagerank_weight > 0.0) {
-        prior = open_prior(rest[0], *opened, error);
+        prior = open_prior(rest[0], *opened, options.pagerank_graph, error);
         if (!prior.has_value()) {
             std::cerr << "search: " << error << "\n";
             return 1;
@@ -1148,7 +1192,8 @@ int cmd_repl(const std::vector<std::string>& args) {
     const std::unique_ptr<CorpusReader> corpus = open_snippet_corpus(rest[0], options, true);
 
     std::string prior_error;
-    const std::optional<PageRankPrior> prior = open_prior(rest[0], *opened, prior_error);
+    const std::optional<PageRankPrior> prior =
+        open_prior(rest[0], *opened, options.pagerank_graph, prior_error);
     if (!prior.has_value() && options.pagerank_weight > 0.0) {
         std::cerr << "search: " << prior_error << "\n";
         return 1;
@@ -1257,11 +1302,14 @@ int cmd_pagerank(const std::vector<std::string>& args) {
     std::size_t iterations = 30;
     double damping = 0.85;
     std::string out;
+    std::string sites;
 
     while (rest.size() >= 2 && rest.front().starts_with("--")) {
         const std::string flag = rest.front();
         if (flag == "--out") {
             out = rest[1];
+        } else if (flag == "--sites") {
+            sites = rest[1];
         } else if (flag == "--iterations") {
             if (!parse_count(rest[1], iterations)) {
                 std::cerr << "search: iterations must be a non-negative integer: " << rest[1]
@@ -1297,7 +1345,18 @@ int cmd_pagerank(const std::vector<std::string>& args) {
         return 1;
     }
 
-    const std::vector<RankedPage> ranking = pagerank(links, iterations, damping);
+    std::vector<RankedPage> ranking;
+    if (sites.empty()) {
+        ranking = pagerank(links, iterations, damping);
+    } else {
+        std::vector<std::pair<std::string, std::string>> urls;
+        if (!read_page_urls(sites, urls, error)) {
+            std::cerr << "search: " << error << "\n";
+            return 1;
+        }
+        ranking = site_pagerank(links, urls, iterations, damping);
+    }
+
     if (!out.empty()) {
         if (!write_pagerank_file(out, ranking, error)) {
             std::cerr << "search: " << error << "\n";

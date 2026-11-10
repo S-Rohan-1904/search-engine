@@ -54,6 +54,7 @@ add_executable(search
   src/complete.cpp
   src/pagerank.cpp
   src/prior.cpp
+  src/siterank.cpp
   src/http.cpp
   src/server.cpp
   src/results.cpp

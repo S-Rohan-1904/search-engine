@@ -1,0 +1,3 @@
+title: Gamma Post
+
+A gamma blog post on garden design, linking to alpha and beta.

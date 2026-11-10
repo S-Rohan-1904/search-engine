@@ -52,7 +52,8 @@ matching uses the stored token positions.
 
 **Ranking.** TF-IDF, BM25, and BM25F with title matches weighted over body
 matches, scored in parallel across document shards. PageRank over the crawled
-link graph, available as a multiplier on the text score.
+link graph, per page or per site with each site's score given to its home page,
+available as a multiplier on the text score.
 
 **Crawler.** robots.txt parsing, a BFS frontier with URL normalization and
 deduplication, path-prefix scoping, HTML-to-text extraction, rate limiting, and
@@ -120,8 +121,8 @@ lowered MRR@10 at every weight: inside a site the best-linked pages are the
 indexes in every navigation bar. On Wikipedia's 12.6 million links it raised
 navigational queries by 0.035 and lowered lookups of a particular article by
 0.007, both with intervals clear of zero, so the cost is PageRank's own. On a
-crawl of 1,096 sites, ranking sites instead of pages raised homepage finding
-from 0.565 to 0.775, and applying it only to one- and two-word queries kept two
+crawl of 1,096 sites, ranking sites instead of pages (`--pagerank-graph site`)
+raised homepage finding from 0.565 to 0.775, and applying it only to one- and two-word queries kept two
 thirds of that gain while cutting the cost to 0.004.
 
 ## Building
@@ -132,7 +133,7 @@ the crawler uses it.
 ```console
 $ cmake -S . -B build && cmake --build build -j
 $ python3 tests/runner.py
-All 915 checks passing.
+All 944 checks passing.
 ```
 
 Tests are end-to-end: each case runs the real binary and compares its output,
