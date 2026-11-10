@@ -29,6 +29,14 @@ struct QueryOptions {
     double pagerank_weight = 0.0;
     LinkGraph pagerank_graph = LinkGraph::Page;
 
+    // Apply the PageRank prior only to queries of at most this many words; 0
+    // applies it to every query. A prior that favours popular pages helps a
+    // query naming a site ("python docs") and hurts one describing a page
+    // ("how to configure logging handlers"), and the short ones are where
+    // the navigational queries are. A word is a term or a word inside a quoted
+    // phrase; AND, OR, NOT and parentheses are not words.
+    std::size_t pagerank_max_words = 0;
+
     // Where snippets are cut from, when it is not the source being queried.
     // An index file holds no document text, so querying one needs to be told,
     // or to find the corpus beside it.

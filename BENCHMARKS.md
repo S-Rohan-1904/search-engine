@@ -404,6 +404,12 @@ relative on all 557 home pages, and rerunning experiment 2 through the engine
 gives the same figures to four places: 0.5645 to 0.7751 on BM25 and 0.6397 to
 0.8353 on BM25F at weight 0.25, and -0.013 on title lookup at weight 0.05.
 
+Routing is part of it too: `--pagerank-max-words 2` applies the prior only to
+queries of at most two words, counting each word of a quoted phrase and not
+counting AND, OR, NOT or parentheses. Through the engine it gives the figures
+in experiment 3: +0.139 homepage and -0.004 title lookup on the crawl, +0.031
+redirects and -0.003 titles on Wikipedia.
+
 ## Skip pointers: measured and rejected
 
 Galloping search in postings intersection, the expected optimisation, made

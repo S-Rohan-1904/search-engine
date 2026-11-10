@@ -11,6 +11,23 @@
 #include "query.hpp"
 #include "snippet.hpp"
 
+namespace {
+
+std::size_t count_words(std::string_view text) {
+    std::size_t words = 0;
+    bool inside = false;
+    for (const char c : text) {
+        const bool space = c == ' ' || c == '\t' || c == '\n' || c == '\r';
+        if (!space && !inside) {
+            words++;
+        }
+        inside = !space;
+    }
+    return words;
+}
+
+}
+
 std::optional<std::vector<QueryResult>> run_query(
     const InvertedIndex& index, const CorpusReader* corpus, std::string_view query,
     const QueryOptions& options, std::string& error, const PageRankPrior* prior) {
@@ -25,19 +42,24 @@ std::optional<std::vector<QueryResult>> run_query(
     const std::vector<std::size_t> matches = evaluate(*parsed.root, index);
     const std::unordered_set<std::size_t> matched(matches.begin(), matches.end());
 
+    std::vector<QueryToken> tokens;
+    std::string ignored;
+    lex_query(query, tokens, ignored);
+
     std::vector<std::string> terms;
-    for (const QueryToken& token : [&] {
-             std::vector<QueryToken> tokens;
-             std::string ignored;
-             lex_query(query, tokens, ignored);
-             return tokens;
-         }()) {
+    std::size_t words = 0;
+    for (const QueryToken& token : tokens) {
         if (token.kind == QueryTokenKind::Term || token.kind == QueryTokenKind::Phrase) {
             for (const std::string& term : query_terms({token.text})) {
                 terms.push_back(term);
             }
+            words += count_words(token.text);
         }
     }
+
+    const bool use_prior =
+        prior != nullptr && options.pagerank_weight > 0.0 &&
+        (options.pagerank_max_words == 0 || words <= options.pagerank_max_words);
 
     std::unordered_map<std::size_t, double> scored;
     for (const ScoredDocument& document : score_unordered(terms, index, options.scorer, 1)) {
@@ -51,7 +73,7 @@ std::optional<std::vector<QueryResult>> run_query(
     for (const std::size_t doc_id : matches) {
         const auto found = scored.find(doc_id);
         double total = found == scored.end() ? 0.0 : found->second;
-        if (prior != nullptr && options.pagerank_weight > 0.0) {
+        if (use_prior) {
             total *= prior->boost(doc_id, options.pagerank_weight);
         }
         ranking.push_back(ScoredDocument{doc_id, total});

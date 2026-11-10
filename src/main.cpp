@@ -93,6 +93,7 @@ int usage() {
                  "      --pagerank <weight>      scale scores by link authority\n"
                  "      --pagerank-graph page|site\n"
                  "                               rank pages, or sites credited to home pages\n"
+                 "      --pagerank-max-words <n> link authority only for queries this short\n"
                  "  repl [options] <source>      read queries until end of input\n"
                  "  bench build <source>         measure index construction\n"
                  "  bench query <source> <query_file>\n"
@@ -487,6 +488,12 @@ bool take_query_options(std::vector<std::string>& args, QueryOptions& options) {
             } catch (const std::exception&) {
                 std::cerr << "search: pagerank weight must be a non-negative number: " << value
                           << "\n";
+                return false;
+            }
+        } else if (flag == "--pagerank-max-words") {
+            if (!parse_count(value, options.pagerank_max_words)) {
+                std::cerr << "search: pagerank-max-words must be a non-negative integer: "
+                          << value << "\n";
                 return false;
             }
         } else if (flag == "--pagerank-graph") {
