@@ -186,13 +186,15 @@ above 1, which is the part that does not depend on the pick.
 Storing the title boundary added one 8-byte table per document to the index
 file (format version 4): 2.2 MB on Simple English Wikipedia, about 1.2%.
 
-## PageRank: measured and rejected as a default
+## PageRank: helps find home pages, hurts everything else
 
 `--pagerank <w>` multiplies the text score by `1 + w * ln(1 + N * pagerank)`.
 N times a page's PageRank is its rank relative to the average page, so a
 weight means the same thing at any graph size, and the factor never drops
 below 1, so link authority reorders matching pages but cannot pull in a page
 that does not match.
+
+### Within sites
 
 **Corpus.** A real crawl of three documentation sites, each with robots.txt
 honoured and a one-second delay between requests:
@@ -235,11 +237,88 @@ PageRank measures the template, not the content. Removing the links that more
 than 20% of pages share was tried on the Python crawl; the best result was a
 tie with plain BM25 (MRR@10 0.8667 against 0.8670), never a gain.
 
-PageRank earns its keep across a web of independent sites, where a link is one
-author vouching for another. Three documentation trees that link only to
-themselves are not that, and a few thousand pages cannot be. So the flag stays,
-the default weight is 0, and BM25F's title weighting does what PageRank was
-hoped to: +0.014 MRR@10.
+That result is about one kind of graph. Three documentation trees that link
+only to themselves have no links from one author vouching for another, which is
+what PageRank was built to read. So the same measurement was repeated on a
+crawl across independent sites.
+
+### Across sites
+
+**Corpus.** A crawl outward from the Hacker News front page, following links to
+any site, at most 15 pages per site and 3 links deep, robots.txt honoured and
+one second between requests to any one site:
+
+    search crawl --all-hosts --concurrency 16 --max-per-host 15 --max-depth 3 \
+        --max-pages 4000 --delay 1000 --out corpus/crawl/web https://news.ycombinator.com/
+
+| Measurement                 | Value  |
+| --------------------------- | ------ |
+| Pages saved                 | 2,994  |
+| Sites                       | 1,096  |
+| Distinct links              | 27,942 |
+| Links between two sites     | 14,713 |
+
+The highest PageRank pages are now other sites' home pages: about.google,
+atproto.com, tiktok.com, joinmastodon.org, postgresql.org, wordpress.org. That
+is the graph PageRank was designed for.
+
+**Homepage finding.** The task PageRank is known to help: the query is a site's
+name, taken mechanically from its home page's title up to the first separator
+("PostgreSQL" from "PostgreSQL: The world's most advanced open source
+database"), and the right answer is that home page rather than any of the
+site's other pages or the pages elsewhere that mention it. 148 sites had a home
+page, at least one other page, and a unique name.
+
+| Scorer | PageRank weight | MRR@10 | Success@1 |
+| ------ | --------------- | ------ | --------- |
+| BM25   | 0               | 0.5645 | 0.4257    |
+| BM25   | 0.05            | 0.6382 | 0.5203    |
+| BM25   | 0.1             | 0.6297 | 0.5068    |
+| BM25   | 0.25            | 0.6150 | 0.4797    |
+| BM25   | 1               | 0.5724 | 0.4527    |
+| BM25F  | 0               | 0.6397 | 0.5203    |
+| BM25F  | 0.1             | 0.6722 | 0.5405    |
+| BM25F  | 0.25            | 0.6747 | 0.5473    |
+
+148 queries is few, so each difference was checked per query, with a 95%
+interval from 10,000 bootstrap resamples of the per-query change in reciprocal
+rank:
+
+| Comparison             | Mean change | 95% interval     | Better / worse |
+| ---------------------- | ----------- | ---------------- | -------------- |
+| BM25, weight 0.05      | +0.074      | +0.035 to +0.114 | 33 / 10        |
+| BM25, weight 0.1       | +0.065      | +0.024 to +0.107 | 37 / 14        |
+| BM25F, weight 0.1      | +0.032      | -0.011 to +0.075 | 32 / 18        |
+| BM25F, weight 0.25     | +0.035      | -0.019 to +0.088 | 37 / 23        |
+
+On BM25 the gain is real. On BM25F it is smaller and not distinguishable from
+noise at this sample size: a home page usually carries the site's name in its
+title, and title weighting already rewards that.
+
+**Title lookup.** The earlier test, on this crawl: every page with a unique
+title, searched for by that title, 2,387 queries.
+
+| Scorer | PageRank weight | MRR@10 | Success@1 |
+| ------ | --------------- | ------ | --------- |
+| BM25   | 0               | 0.8606 | 0.8073    |
+| BM25   | 0.05            | 0.8477 | 0.7834    |
+| BM25   | 0.1             | 0.8236 | 0.7461    |
+| BM25   | 0.25            | 0.7620 | 0.6548    |
+| BM25F  | 0               | 0.8970 | 0.8517    |
+| BM25F  | 0.1             | 0.8513 | 0.7763    |
+
+Favouring well-linked pages costs accuracy when the page being looked for is an
+ordinary one, across sites as within them.
+
+### What follows
+
+PageRank is a prior on which page a searcher wants when the text cannot decide.
+For navigational queries across independent sites it is right more often than
+not: +0.074 MRR@10 on plain BM25, with an interval clear of zero. For finding a
+particular page, and anywhere inside one site, it is wrong more often than not.
+The default weight stays 0, `--pagerank 0.05` is the setting for navigational
+search over a crawl of many sites, and BM25F's title weighting, which helps on
+every test here, is the stronger single change.
 
 ## Skip pointers: measured and rejected
 

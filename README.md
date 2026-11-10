@@ -56,8 +56,9 @@ link graph, available as a multiplier on the text score.
 
 **Crawler.** robots.txt parsing, a BFS frontier with URL normalization and
 deduplication, path-prefix scoping, HTML-to-text extraction, rate limiting, and
-content-hash duplicate detection. Run for real against three documentation
-sites: 2,424 pages and 162,186 links.
+content-hash duplicate detection, fetching from many hosts in parallel while
+spacing requests to each one. Run for real against three documentation sites
+(2,424 pages) and across 1,096 independent sites (2,994 pages).
 
 **On top of that.** Snippet generation with query terms highlighted, spelling
 correction via a BK-tree over Levenshtein distance ("did you mean"), trie
@@ -114,10 +115,13 @@ were kept whole; and nDCG used exponential gain where `trec_eval` uses linear.
 The engine's own nDCG agrees with `pytrec_eval` on its run file to four
 places. The whole account is in [BENCHMARKS.md](BENCHMARKS.md).
 
-**PageRank, measured and rejected as a default.** On the 2,424-page crawl,
-2,338 known-item queries, every PageRank weight lowered MRR@10 (0.874 to 0.786
-at a weight of 0.1). Within a site the top-ranked pages are the indexes and the
-copyright page in every navigation bar. The flag stays; the default is off.
+**PageRank, measured on two kinds of graph.** On a crawl of three documentation
+sites it lowered MRR@10 at every weight, because inside a site the
+best-linked pages are the indexes in every navigation bar. On a 2,994-page
+crawl across 1,096 independent sites it raised homepage finding from 0.565 to
+0.638 MRR@10 (95% interval of the gain +0.035 to +0.114), and still lowered
+lookups of ordinary pages. The default weight is 0; `--pagerank 0.05` is for
+navigational search across many sites.
 
 ## Building
 
