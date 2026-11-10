@@ -33,6 +33,16 @@ CASES = [
         "stdout": BOOSTED,
     },
     {
+        "name": "pagerank --out writes the file index-write keeps beside an index",
+        "argv": ["pagerank", "--out", "build/crawl-prior.idx.pagerank", "build/crawled/links.tsv"],
+        "stdout": "",
+    },
+    {
+        "name": "and an index ranks with it exactly as before",
+        "argv": ["query", "--tsv", "--pagerank", "1", "build/crawl-prior.idx", "page"],
+        "stdout": BOOSTED,
+    },
+    {
         "name": "a document that does not match is not carried in by its links",
         "argv": ["query", "--tsv", "--pagerank", "5", "build/crawled", "planet"],
         "stdout": "doc_0004\t10.6443",

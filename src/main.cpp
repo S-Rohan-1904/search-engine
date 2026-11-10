@@ -129,7 +129,7 @@ int usage() {
                  "                               dictionary terms near a misspelling\n"
                  "  complete [--limit <n>] <source> <prefix>\n"
                  "                               dictionary terms beginning with a prefix\n"
-                 "  pagerank [--iterations <n>] [--damping <d>] <links_file>\n"
+                 "  pagerank [--iterations <n>] [--damping <d>] [--out <file>] <links_file>\n"
                  "                               PageRank over a crawl's link graph\n"
                  "  url <url>                    normalize a url\n"
                  "  url-resolve <base> <ref>     resolve a link against a base url\n"
@@ -1256,10 +1256,13 @@ int cmd_pagerank(const std::vector<std::string>& args) {
     std::vector<std::string> rest = args;
     std::size_t iterations = 30;
     double damping = 0.85;
+    std::string out;
 
     while (rest.size() >= 2 && rest.front().starts_with("--")) {
         const std::string flag = rest.front();
-        if (flag == "--iterations") {
+        if (flag == "--out") {
+            out = rest[1];
+        } else if (flag == "--iterations") {
             if (!parse_count(rest[1], iterations)) {
                 std::cerr << "search: iterations must be a non-negative integer: " << rest[1]
                           << "\n";
@@ -1294,8 +1297,17 @@ int cmd_pagerank(const std::vector<std::string>& args) {
         return 1;
     }
 
+    const std::vector<RankedPage> ranking = pagerank(links, iterations, damping);
+    if (!out.empty()) {
+        if (!write_pagerank_file(out, ranking, error)) {
+            std::cerr << "search: " << error << "\n";
+            return 1;
+        }
+        return 0;
+    }
+
     std::cout << std::fixed << std::setprecision(6);
-    for (const RankedPage& page : pagerank(links, iterations, damping)) {
+    for (const RankedPage& page : ranking) {
         std::cout << page.page << " " << page.score << "\n";
     }
     return 0;
