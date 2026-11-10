@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "index.hpp"
@@ -59,7 +61,12 @@ std::vector<ScoredDocument> score_bm25(const std::vector<std::string>& terms,
 enum class Scorer {
     TfIdf,
     Bm25,
+    Bm25F,
 };
+
+std::optional<Scorer> parse_scorer(std::string_view name);
+
+const char* scorer_name(Scorer scorer);
 
 // Scores on several threads, with a result identical to the single-threaded
 // scorers for any thread count.

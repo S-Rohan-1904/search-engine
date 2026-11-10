@@ -34,6 +34,11 @@ struct Posting {
 // ids live in one vector that the numeric id indexes. Postings therefore hold
 // a size_t rather than a string, which keeps them small and makes the
 // intersection work in Phase 3 cheap.
+struct TitleField {
+    std::size_t span = 0;
+    std::size_t terms = 0;
+};
+
 class InvertedIndex {
 public:
     // Registers doc_id and files every distinct term in terms under it.
@@ -42,7 +47,7 @@ public:
     // is therefore its document frequency, and each posting carries that
     // document's count and the token positions behind it.
     void add_document(std::string doc_id, const std::vector<Token>& terms,
-                      std::uint64_t fingerprint = 0);
+                      std::uint64_t fingerprint = 0, std::size_t title_span = 0);
 
     std::size_t document_count() const;
 
@@ -75,6 +80,10 @@ public:
     // divides by this to decide whether a document is long or short relative
     // to its peers.
     double average_document_length() const;
+
+    TitleField document_title(std::size_t doc_id) const;
+
+    double average_title_length() const;
 
     // A hash of the bytes the document was built from, or 0 when unknown.
     //
@@ -126,7 +135,8 @@ public:
         std::vector<std::string> document_ids,
         std::vector<std::size_t> document_lengths,
         std::vector<std::uint64_t> document_fingerprints,
-        std::unordered_map<std::string, std::vector<Posting>> postings);
+        std::unordered_map<std::string, std::vector<Posting>> postings,
+        std::vector<TitleField> document_titles = {});
 
 private:
     // The mapped file, the terms decoded from it so far, and the lock that
@@ -140,6 +150,7 @@ private:
     mutable std::vector<std::string> document_ids_;
     std::vector<std::size_t> document_lengths_;
     std::vector<std::uint64_t> document_fingerprints_;
+    std::vector<TitleField> document_titles_;
     std::unordered_map<std::string, std::vector<Posting>> postings_;
 
     // Sum of document_lengths_, kept current by every method that adds
@@ -147,6 +158,7 @@ private:
     // re-summing the lengths there would make scoring one query cost
     // O(postings * documents).
     std::size_t total_document_length_ = 0;
+    std::size_t total_title_length_ = 0;
 };
 
 // Builds an index over the named documents, in the order given. Documents that

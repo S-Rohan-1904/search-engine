@@ -14,6 +14,7 @@ namespace {
 
 constexpr double kBm25K1 = 1.2;
 constexpr double kBm25B = 0.75;
+constexpr double kBm25FTitleWeight = 2.0;
 
 bool ranks_before(const ScoredDocument& a, const ScoredDocument& b) {
     if (a.score != b.score) {
@@ -33,6 +34,34 @@ double bm25_weight(const Posting& posting, double idf, const InvertedIndex& inde
     const double normalized = average_length > 0.0 ? length / average_length : 1.0;
     const double denominator = frequency + kBm25K1 * (1.0 - kBm25B + kBm25B * normalized);
     return idf * frequency * (kBm25K1 + 1.0) / denominator;
+}
+
+double bm25f_weight(const Posting& posting, double idf, const InvertedIndex& index) {
+    const TitleField title = index.document_title(posting.doc_id);
+    const auto body_start = std::lower_bound(posting.positions.begin(), posting.positions.end(),
+                                             title.span);
+    const double title_frequency =
+        static_cast<double>(std::distance(posting.positions.begin(), body_start));
+    const double body_frequency = static_cast<double>(posting.frequency) - title_frequency;
+
+    const double title_length = static_cast<double>(title.terms);
+    const double body_length =
+        static_cast<double>(index.document_length(posting.doc_id)) - title_length;
+    const double average_title = index.average_title_length();
+    const double average_body = index.average_document_length() - average_title;
+
+    const auto normalized = [](double frequency, double length, double average) {
+        if (frequency <= 0.0) {
+            return 0.0;
+        }
+        const double ratio = average > 0.0 ? length / average : 1.0;
+        return frequency / (1.0 - kBm25B + kBm25B * ratio);
+    };
+
+    const double combined = kBm25FTitleWeight * normalized(title_frequency, title_length,
+                                                           average_title) +
+                            normalized(body_frequency, body_length, average_body);
+    return idf * combined / (kBm25K1 + combined);
 }
 
 double tfidf_idf(double document_count, double df) {
@@ -56,16 +85,25 @@ std::vector<ScoredDocument> score_shard(const std::vector<std::string>& terms,
         }
 
         const double df = static_cast<double>(postings.size());
-        const double idf = scorer == Scorer::Bm25 ? bm25_idf(document_count, df)
-                                                  : tfidf_idf(document_count, df);
+        const double idf = scorer == Scorer::TfIdf ? tfidf_idf(document_count, df)
+                                                   : bm25_idf(document_count, df);
 
         auto it = std::lower_bound(
             postings.begin(), postings.end(), first_doc,
             [](const Posting& posting, std::size_t target) { return posting.doc_id < target; });
 
         for (; it != postings.end() && it->doc_id < last_doc; ++it) {
-            totals[it->doc_id] += scorer == Scorer::Bm25 ? bm25_weight(*it, idf, index)
-                                                         : tfidf_weight(*it, idf, index);
+            switch (scorer) {
+                case Scorer::TfIdf:
+                    totals[it->doc_id] += tfidf_weight(*it, idf, index);
+                    break;
+                case Scorer::Bm25:
+                    totals[it->doc_id] += bm25_weight(*it, idf, index);
+                    break;
+                case Scorer::Bm25F:
+                    totals[it->doc_id] += bm25f_weight(*it, idf, index);
+                    break;
+            }
         }
     }
 
@@ -121,6 +159,31 @@ std::vector<ScoredDocument> score(const std::vector<std::string>& terms,
 
     std::sort(merged.begin(), merged.end(), ranks_before);
     return merged;
+}
+
+std::optional<Scorer> parse_scorer(std::string_view name) {
+    if (name == "bm25") {
+        return Scorer::Bm25;
+    }
+    if (name == "bm25f") {
+        return Scorer::Bm25F;
+    }
+    if (name == "tfidf") {
+        return Scorer::TfIdf;
+    }
+    return std::nullopt;
+}
+
+const char* scorer_name(Scorer scorer) {
+    switch (scorer) {
+        case Scorer::TfIdf:
+            return "tfidf";
+        case Scorer::Bm25:
+            return "bm25";
+        case Scorer::Bm25F:
+            return "bm25f";
+    }
+    return "bm25";
 }
 
 std::vector<ScoredDocument> score_tfidf(const std::vector<std::string>& terms,

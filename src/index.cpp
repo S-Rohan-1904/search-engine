@@ -31,12 +31,21 @@ InvertedIndex InvertedIndex::from_mapped(MappedIndex mapped) {
 }
 
 void InvertedIndex::add_document(std::string doc_id, const std::vector<Token>& terms,
-                                 std::uint64_t fingerprint) {
+                                 std::uint64_t fingerprint, std::size_t title_span) {
     const std::size_t ordinal = document_ids_.size();
     document_ids_.push_back(std::move(doc_id));
     document_lengths_.push_back(terms.size());
     total_document_length_ += terms.size();
     document_fingerprints_.push_back(fingerprint);
+
+    TitleField title{title_span, 0};
+    for (const Token& token : terms) {
+        if (token.position < title_span) {
+            title.terms++;
+        }
+    }
+    document_titles_.push_back(title);
+    total_title_length_ += title.terms;
 
     for (const Token& token : terms) {
         std::vector<Posting>& postings = postings_[token.text];
@@ -113,6 +122,29 @@ double InvertedIndex::average_document_length() const {
 
     return static_cast<double>(total_document_length_) /
            static_cast<double>(document_lengths_.size());
+}
+
+TitleField InvertedIndex::document_title(std::size_t doc_id) const {
+    if (mapped_) {
+        return mapped_->mapped.document_title(doc_id);
+    }
+    return doc_id < document_titles_.size() ? document_titles_[doc_id] : TitleField{};
+}
+
+double InvertedIndex::average_title_length() const {
+    if (mapped_) {
+        const std::size_t documents = mapped_->mapped.document_count();
+        if (documents == 0) {
+            return 0.0;
+        }
+        return static_cast<double>(mapped_->mapped.total_title_length()) /
+               static_cast<double>(documents);
+    }
+
+    if (document_titles_.empty()) {
+        return 0.0;
+    }
+    return static_cast<double>(total_title_length_) / static_cast<double>(document_titles_.size());
 }
 
 std::uint64_t InvertedIndex::document_fingerprint(std::size_t doc_id) const {
@@ -192,14 +224,20 @@ InvertedIndex InvertedIndex::from_parts(
     std::vector<std::string> document_ids,
     std::vector<std::size_t> document_lengths,
     std::vector<std::uint64_t> document_fingerprints,
-    std::unordered_map<std::string, std::vector<Posting>> postings) {
+    std::unordered_map<std::string, std::vector<Posting>> postings,
+    std::vector<TitleField> document_titles) {
     InvertedIndex index;
     index.document_ids_ = std::move(document_ids);
     index.document_lengths_ = std::move(document_lengths);
     index.document_fingerprints_ = std::move(document_fingerprints);
+    index.document_titles_ = std::move(document_titles);
+    index.document_titles_.resize(index.document_ids_.size());
     index.postings_ = std::move(postings);
     for (const std::size_t length : index.document_lengths_) {
         index.total_document_length_ += length;
+    }
+    for (const TitleField& title : index.document_titles_) {
+        index.total_title_length_ += title.terms;
     }
     return index;
 }
@@ -234,7 +272,8 @@ InvertedIndex update_index(const InvertedIndex& previous,
 
         if (old.has_value() && fingerprint != 0 &&
             previous.document_fingerprint(*old) == fingerprint) {
-            index.add_document(id, previous.document_terms(*old), fingerprint);
+            index.add_document(id, previous.document_terms(*old), fingerprint,
+                               previous.document_title(*old).span);
             kept.emplace(id, *old);
             report.unchanged++;
             continue;
@@ -245,7 +284,7 @@ InvertedIndex update_index(const InvertedIndex& previous,
             continue;
         }
 
-        index.add_document(id, analyze_document(*doc), fingerprint);
+        index.add_document(id, analyze_document(*doc), fingerprint, title_span(*doc));
         if (old.has_value()) {
             report.updated++;
         } else {
@@ -300,6 +339,9 @@ void InvertedIndex::append(InvertedIndex other) {
     document_fingerprints_.insert(document_fingerprints_.end(),
                                   other.document_fingerprints_.begin(),
                                   other.document_fingerprints_.end());
+    document_titles_.insert(document_titles_.end(), other.document_titles_.begin(),
+                            other.document_titles_.end());
+    total_title_length_ += other.total_title_length_;
 }
 
 InvertedIndex build_index_from(const CorpusReader& corpus,
@@ -308,7 +350,8 @@ InvertedIndex build_index_from(const CorpusReader& corpus,
     for (const std::string& id : ids) {
         const std::optional<Document> doc = corpus.read(id);
         if (doc.has_value()) {
-            index.add_document(id, analyze_document(*doc), corpus.fingerprint(id));
+            index.add_document(id, analyze_document(*doc), corpus.fingerprint(id),
+                               title_span(*doc));
         }
     }
     return index;

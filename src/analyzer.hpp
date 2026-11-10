@@ -28,3 +28,5 @@ std::vector<Token> analyze(std::string_view text);
 // Analyzes a document as one stream: title, blank line, body. Title terms come
 // first and body offsets are shifted past the title.
 std::vector<Token> analyze_document(const Document& doc);
+
+std::size_t title_span(const Document& doc);

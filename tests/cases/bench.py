@@ -7,27 +7,27 @@ CASES = [
     {
         "name": "build reports the shape of the index it built",
         "argv": ["bench", "build", "--stable", "corpus/fixtures"],
-        "stdout": "source corpus/fixtures\nsource_bytes 4361\nthreads 1\ndocuments 30\nterms 235\npostings 343\nindex_bytes 5976",
+        "stdout": "source corpus/fixtures\nsource_bytes 4361\nthreads 1\ndocuments 30\nterms 235\npostings 343\nindex_bytes 6224",
     },
     {
         "name": "the tiny fixture",
         "argv": ["bench", "build", "--stable", "tests/fixtures/tiny"],
-        "stdout": "source tests/fixtures/tiny\nsource_bytes 199\nthreads 1\ndocuments 3\nterms 11\npostings 19\nindex_bytes 403",
+        "stdout": "source tests/fixtures/tiny\nsource_bytes 199\nthreads 1\ndocuments 3\nterms 11\npostings 19\nindex_bytes 435",
     },
     {
         "name": "an empty corpus measures as empty",
         "argv": ["bench", "build", "--stable", "tests/fixtures/empty"],
-        "stdout": "source tests/fixtures/empty\nsource_bytes 0\nthreads 1\ndocuments 0\nterms 0\npostings 0\nindex_bytes 73",
+        "stdout": "source tests/fixtures/empty\nsource_bytes 0\nthreads 1\ndocuments 0\nterms 0\npostings 0\nindex_bytes 81",
     },
     {
         "name": "thread count is reported back",
         "argv": ["bench", "build", "--stable", "--threads", "4", "corpus/fixtures"],
-        "stdout": "source corpus/fixtures\nsource_bytes 4361\nthreads 4\ndocuments 30\nterms 235\npostings 343\nindex_bytes 5976",
+        "stdout": "source corpus/fixtures\nsource_bytes 4361\nthreads 4\ndocuments 30\nterms 235\npostings 343\nindex_bytes 6224",
     },
     {
         "name": "more threads do not change what was built",
         "argv": ["bench", "build", "--stable", "--threads", "8", "corpus/fixtures"],
-        "stdout": "source corpus/fixtures\nsource_bytes 4361\nthreads 8\ndocuments 30\nterms 235\npostings 343\nindex_bytes 5976",
+        "stdout": "source corpus/fixtures\nsource_bytes 4361\nthreads 8\ndocuments 30\nterms 235\npostings 343\nindex_bytes 6224",
     },
     {
         "name": "query reports how many queries ran and what they returned",

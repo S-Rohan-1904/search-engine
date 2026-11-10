@@ -75,3 +75,7 @@ std::vector<Token> analyze(std::string_view text) {
 std::vector<Token> analyze_document(const Document& doc) {
     return analyze(doc.title + "\n\n" + doc.body);
 }
+
+std::size_t title_span(const Document& doc) {
+    return split_compounds(tokenize(doc.title)).size();
+}

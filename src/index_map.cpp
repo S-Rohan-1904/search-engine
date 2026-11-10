@@ -6,10 +6,24 @@
 namespace {
 
 constexpr unsigned char kMagic[4] = {'S', 'I', 'D', 'X'};
-constexpr std::uint32_t kVersion = 3;
+constexpr std::uint32_t kVersion = 4;
 
-// magic, version, encoding byte, then seven u64 header fields.
-constexpr std::size_t kHeaderBytes = 4 + 4 + 1 + 7 * 8;
+constexpr std::size_t kHeaderBytes = 4 + 4 + 1 + 8 * 8;
+
+}
+
+std::uint64_t pack_title(const TitleField& title) {
+    const std::uint64_t limit = 0xFFFFFFFFu;
+    return (std::min<std::uint64_t>(title.span, limit) << 32) |
+           std::min<std::uint64_t>(title.terms, limit);
+}
+
+TitleField unpack_title(std::uint64_t packed) {
+    return TitleField{static_cast<std::size_t>(packed >> 32),
+                      static_cast<std::size_t>(packed & 0xFFFFFFFFu)};
+}
+
+namespace {
 
 bool uses_deltas(IndexEncoding encoding) {
     return encoding != IndexEncoding::Plain;
@@ -108,6 +122,7 @@ std::vector<unsigned char> encode_index_v3(const InvertedIndex& index, IndexEnco
     put_u64(out, 0);  // fingerprints
     put_u64(out, 0);  // id offsets
     put_u64(out, 0);  // term offsets
+    put_u64(out, 0);
 
     IndexSizeReport sizes{};
     sizes.header = out.size();
@@ -121,6 +136,10 @@ std::vector<unsigned char> encode_index_v3(const InvertedIndex& index, IndexEnco
     const std::size_t fingerprints_at = out.size();
     for (std::size_t doc_id = 0; doc_id < documents; doc_id++) {
         put_u64(out, index.document_fingerprint(doc_id));
+    }
+    const std::size_t titles_at = out.size();
+    for (std::size_t doc_id = 0; doc_id < documents; doc_id++) {
+        put_u64(out, pack_title(index.document_title(doc_id)));
     }
 
     // Ids as one blob plus a table of where each starts, so the last entry
@@ -185,6 +204,7 @@ std::vector<unsigned char> encode_index_v3(const InvertedIndex& index, IndexEnco
     patch_u64(out, tables_at + 8, fingerprints_at);
     patch_u64(out, tables_at + 16, id_offsets_at);
     patch_u64(out, tables_at + 24, term_offsets_at);
+    patch_u64(out, tables_at + 32, titles_at);
 
     sizes.total = out.size();
     if (report != nullptr) {
@@ -231,12 +251,14 @@ std::optional<MappedIndex> MappedIndex::open(const std::filesystem::path& path,
     index.fingerprints_at_ = static_cast<std::size_t>(read_u64(data, 41));
     index.id_offsets_at_ = static_cast<std::size_t>(read_u64(data, 49));
     index.term_offsets_at_ = static_cast<std::size_t>(read_u64(data, 57));
+    index.titles_at_ = static_cast<std::size_t>(read_u64(data, 65));
 
     // Every table is fixed width, so one bounds check each covers all of it.
     const std::size_t documents = index.document_count_;
     const std::size_t terms = index.term_count_;
     if (index.lengths_at_ > size || size - index.lengths_at_ < documents * 8 ||
         index.fingerprints_at_ > size || size - index.fingerprints_at_ < documents * 8 ||
+        index.titles_at_ > size || size - index.titles_at_ < documents * 8 ||
         index.id_offsets_at_ > size || size - index.id_offsets_at_ < (documents + 1) * 8 ||
         index.term_offsets_at_ > size || size - index.term_offsets_at_ < terms * 8) {
         error = "truncated index file";
@@ -251,6 +273,7 @@ std::optional<MappedIndex> MappedIndex::open(const std::filesystem::path& path,
             return std::nullopt;
         }
         index.total_document_length_ += read_u64(data, index.lengths_at_ + doc_id * 8);
+        index.total_title_length_ += unpack_title(read_u64(data, index.titles_at_ + doc_id * 8)).terms;
     }
 
     for (std::size_t slot = 0; slot < terms; slot++) {
@@ -275,6 +298,13 @@ std::uint64_t MappedIndex::document_fingerprint(std::size_t doc_id) const {
         return 0;
     }
     return read_u64(data_.data(), fingerprints_at_ + doc_id * 8);
+}
+
+TitleField MappedIndex::document_title(std::size_t doc_id) const {
+    if (doc_id >= document_count_) {
+        return {};
+    }
+    return unpack_title(read_u64(data_.data(), titles_at_ + doc_id * 8));
 }
 
 std::string_view MappedIndex::document_id(std::size_t doc_id) const {

@@ -27,10 +27,14 @@
 //
 // The payload encoding is unchanged, so the compression the earlier stages
 // measured still applies.
+std::uint64_t pack_title(const TitleField& title);
+
+TitleField unpack_title(std::uint64_t packed);
+
 class MappedIndex {
 public:
     // Maps an index file. Returns nullopt with `error` set when the file is
-    // missing, is not an index, or is not version 3 -- an older file is still
+    // missing, is not an index, or is not version 4 -- an older file is still
     // readable, just not this way, so the caller falls back to decoding it.
     static std::optional<MappedIndex> open(const std::filesystem::path& path, std::string& error);
 
@@ -40,6 +44,7 @@ public:
 
     std::size_t document_length(std::size_t doc_id) const;
     std::uint64_t document_fingerprint(std::size_t doc_id) const;
+    TitleField document_title(std::size_t doc_id) const;
     std::string_view document_id(std::size_t doc_id) const;
 
     // The postings for a term, decoded on the spot, or an empty list if the
@@ -63,6 +68,7 @@ public:
 
     // The total of every document length, for the BM25 average.
     std::uint64_t total_document_length() const { return total_document_length_; }
+    std::uint64_t total_title_length() const { return total_title_length_; }
 
 private:
     MappedFile data_;
@@ -72,11 +78,13 @@ private:
     std::size_t posting_count_ = 0;
     std::size_t lengths_at_ = 0;
     std::size_t fingerprints_at_ = 0;
+    std::size_t titles_at_ = 0;
     std::size_t id_offsets_at_ = 0;
     std::size_t term_offsets_at_ = 0;
     std::uint64_t total_document_length_ = 0;
+    std::uint64_t total_title_length_ = 0;
 };
 
-// Encodes an index in version 3, with the tables that make it mappable.
+// Encodes an index in version 4, with the tables that make it mappable.
 std::vector<unsigned char> encode_index_v3(const InvertedIndex& index, IndexEncoding encoding,
                                            IndexSizeReport* report);

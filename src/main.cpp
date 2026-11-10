@@ -83,7 +83,8 @@ int usage() {
                  "  query [options] <source> <query>\n"
                  "                               ranked results for a boolean query\n"
                  "      --limit <n>              how many results (default 10)\n"
-                 "      --scorer bm25|tfidf      which ranking function\n"
+                 "      --scorer bm25|bm25f|tfidf\n"
+                 "                               which ranking function\n"
                  "      --snippet                show an excerpt under each result\n"
                  "      --corpus <path>          where to read snippet text from\n"
                  "      --max-chars <n>          how long an excerpt may be\n"
@@ -483,14 +484,12 @@ bool take_query_options(std::vector<std::string>& args, QueryOptions& options) {
                 return false;
             }
         } else if (flag == "--scorer") {
-            if (value == "bm25") {
-                options.scorer = Scorer::Bm25;
-            } else if (value == "tfidf") {
-                options.scorer = Scorer::TfIdf;
-            } else {
+            const std::optional<Scorer> scorer = parse_scorer(value);
+            if (!scorer.has_value()) {
                 std::cerr << "search: unknown scorer: " << value << "\n";
                 return false;
             }
+            options.scorer = *scorer;
         } else {
             std::cerr << "search: unknown option: " << flag << "\n";
             return false;
@@ -783,7 +782,7 @@ int cmd_evaluate(const std::vector<std::string>& args) {
 
     std::cout << "queries " << report.queries << "\n"
               << "unjudged " << report.unjudged << "\n"
-              << "scorer " << (options.scorer == Scorer::Bm25 ? "bm25" : "tfidf") << "\n"
+              << "scorer " << scorer_name(options.scorer) << "\n"
               << std::fixed << std::setprecision(4)
               << "ndcg_at_10 " << report.ndcg_at_10 << "\n"
               << "precision_at_10 " << report.precision_at_10 << "\n"
@@ -1060,7 +1059,7 @@ int repl_meta_command(const std::string& line, QueryOptions& options, ReplLexico
     if (name == ":help") {
         std::cout << "queries use AND, OR, NOT, parentheses and \"phrases\"\n"
                      ":limit <n>      how many results to show\n"
-                     ":scorer <name>  bm25 or tfidf\n"
+                     ":scorer <name>  bm25, bm25f or tfidf\n"
                      ":snippet <on|off>\n"
                      ":pagerank <w>   weight of link authority, 0 is off\n"
                      ":complete <p>   indexed terms beginning with a prefix\n"
@@ -1070,7 +1069,7 @@ int repl_meta_command(const std::string& line, QueryOptions& options, ReplLexico
     }
     if (name == ":settings") {
         std::cout << "limit " << options.limit << "\n"
-                  << "scorer " << (options.scorer == Scorer::Bm25 ? "bm25" : "tfidf") << "\n"
+                  << "scorer " << scorer_name(options.scorer) << "\n"
                   << "snippet " << (options.snippets ? "on" : "off") << "\n"
                   << "pagerank " << std::defaultfloat << options.pagerank_weight << "\n";
         return 0;
@@ -1082,12 +1081,11 @@ int repl_meta_command(const std::string& line, QueryOptions& options, ReplLexico
         return 0;
     }
     if (name == ":scorer") {
-        if (value == "bm25") {
-            options.scorer = Scorer::Bm25;
-        } else if (value == "tfidf") {
-            options.scorer = Scorer::TfIdf;
+        const std::optional<Scorer> scorer = parse_scorer(value);
+        if (scorer.has_value()) {
+            options.scorer = *scorer;
         } else {
-            std::cout << "scorer must be bm25 or tfidf\n";
+            std::cout << "scorer must be bm25, bm25f or tfidf\n";
         }
         return 0;
     }

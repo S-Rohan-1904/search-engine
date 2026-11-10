@@ -62,7 +62,7 @@ CASES = [
         "name": "help lists the commands",
         "argv": ["repl", "corpus/fixtures"],
         "stdin": ":help\n",
-        "stdout": "queries use AND, OR, NOT, parentheses and \"phrases\"\n:limit <n>      how many results to show\n:scorer <name>  bm25 or tfidf\n:snippet <on|off>\n:pagerank <w>   weight of link authority, 0 is off\n:complete <p>   indexed terms beginning with a prefix\n:settings       show the current settings\n:quit",
+        "stdout": "queries use AND, OR, NOT, parentheses and \"phrases\"\n:limit <n>      how many results to show\n:scorer <name>  bm25, bm25f or tfidf\n:snippet <on|off>\n:pagerank <w>   weight of link authority, 0 is off\n:complete <p>   indexed terms beginning with a prefix\n:settings       show the current settings\n:quit",
     },
     {
         "name": "quit ends the session early",
@@ -98,7 +98,7 @@ CASES = [
         "name": "an unknown scorer is rejected",
         "argv": ["repl", "corpus/fixtures"],
         "stdin": ":scorer bogus\n:settings\n",
-        "stdout": "scorer must be bm25 or tfidf\nlimit 10\nscorer bm25\nsnippet off\npagerank 0",
+        "stdout": "scorer must be bm25, bm25f or tfidf\nlimit 10\nscorer bm25\nsnippet off\npagerank 0",
     },
     {
         "name": "end of input ends the session",

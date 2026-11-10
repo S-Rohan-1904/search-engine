@@ -20,7 +20,7 @@ double elapsed_ms(Clock::time_point from, Clock::time_point to) {
     return std::chrono::duration<double, std::milli>(to - from).count();
 }
 
-// The output is written in the same version 3 layout the in-memory encoder
+// The output is written in the same version 4 layout the in-memory encoder
 // produces, but streamed: the tables whose contents are only known at the end
 // are written after the data they describe, and the header points at them.
 class StreamWriter {
@@ -72,7 +72,7 @@ struct Cursor {
 };
 
 constexpr unsigned char kMagic[4] = {'S', 'I', 'D', 'X'};
-constexpr std::uint32_t kVersion = 3;
+constexpr std::uint32_t kVersion = 4;
 
 }
 
@@ -109,7 +109,8 @@ bool build_index_external(const std::filesystem::path& source,
         for (std::size_t i = first; i < last; i++) {
             const std::optional<Document> doc = corpus->read(ids[i]);
             if (doc.has_value()) {
-                block.add_document(ids[i], analyze_document(*doc), corpus->fingerprint(ids[i]));
+                block.add_document(ids[i], analyze_document(*doc), corpus->fingerprint(ids[i]),
+                                   title_span(*doc));
             }
         }
 
@@ -162,7 +163,7 @@ bool build_index_external(const std::filesystem::path& source,
     writer.byte(static_cast<unsigned char>(IndexEncoding::VarByte));
 
     const std::size_t header_at = writer.cursor();
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 8; i++) {
         writer.fixed64(0);
     }
 
@@ -177,6 +178,13 @@ bool build_index_external(const std::filesystem::path& source,
     for (const Cursor& cursor : cursors) {
         for (std::size_t doc_id = 0; doc_id < cursor.index.document_count(); doc_id++) {
             writer.fixed64(cursor.index.document_fingerprint(doc_id));
+        }
+    }
+
+    const std::size_t titles_at = writer.cursor();
+    for (const Cursor& cursor : cursors) {
+        for (std::size_t doc_id = 0; doc_id < cursor.index.document_count(); doc_id++) {
+            writer.fixed64(pack_title(cursor.index.document_title(doc_id)));
         }
     }
 
@@ -321,9 +329,9 @@ bool build_index_external(const std::filesystem::path& source,
 
     // Everything the header points at is now placed, so go back and fill it in.
     out.seekp(static_cast<std::streamoff>(header_at));
-    const std::uint64_t fields[7] = {report.documents,  report.terms,   report.postings,
+    const std::uint64_t fields[8] = {report.documents,  report.terms,   report.postings,
                                      lengths_at,        fingerprints_at, id_offsets_at,
-                                     term_offsets_at};
+                                     term_offsets_at,   titles_at};
     for (const std::uint64_t value : fields) {
         for (int shift = 0; shift < 64; shift += 8) {
             out.put(static_cast<char>((value >> shift) & 0xFF));
