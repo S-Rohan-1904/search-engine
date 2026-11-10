@@ -13,7 +13,7 @@ Everything below takes about twenty minutes, most of it downloading Wikipedia.
 |---|---|
 | CMake | 3.20 or newer |
 | A C++20 compiler | GCC 12+, Clang 15+, or Apple Clang 15+ |
-| libcurl | optional — only the crawler needs it |
+| libcurl | optional, only the crawler needs it |
 | Python 3 | 3.9+, for the test runner and the analytics script |
 
 Without libcurl the build still succeeds; the crawler then works against
@@ -51,7 +51,7 @@ outside `build/`.
 
 **Undefined `std::__cxx11` symbols at link time, on macOS.** Your environment
 is pointing the compiler at one standard library's headers while linking
-another — usually a `CPLUS_INCLUDE_PATH` set for Homebrew GCC while CMake picks
+another, usually a `CPLUS_INCLUDE_PATH` set for Homebrew GCC while CMake picks
 Apple Clang. Build in a shell without it:
 
 ```bash
@@ -103,7 +103,7 @@ In the REPL, `:help` lists what it understands. Queries take `AND`, `OR`,
 
 About 600 MB downloaded, 400 MB after import, 188 MB as an index.
 
-Wikipedia publishes CirrusSearch dumps — the same data its own search runs on,
+Wikipedia publishes CirrusSearch dumps: the same data its own search runs on,
 with templates and markup already stripped. That is why these rather than
 `pages-articles`: the wikitext stripper is the hard part of importing
 Wikipedia, and it has been done properly upstream.
@@ -112,7 +112,7 @@ Wikipedia, and it has been done properly upstream.
 ./tools/fetch_wikipedia.sh
 ```
 
-Or by hand — dumps are kept for about three months, so check the index page at
+Or by hand. Dumps are kept for about three months, so check the index page at
 `https://dumps.wikimedia.org/other/cirrussearch/` for a current date:
 
 ```bash
@@ -131,7 +131,7 @@ gzcat corpus/wikipedia/simplewiki-*-cirrussearch-content.json.gz \
 ```
 
 That takes about 30 seconds on 8 cores and peaks around 2.9 GB. If that is more
-memory than you want to give it, build in blocks instead — same output, byte
+memory than you want to give it, build in blocks instead: same output, byte
 for byte, at whatever peak you choose:
 
 ```bash
@@ -171,7 +171,7 @@ found automatically if it sits beside the index under the same name
 ./tools/bench.sh corpus/wikipedia/simplewiki.corpus
 ```
 
-Prints the table in [BENCHMARKS.md](BENCHMARKS.md) — build times at one and all
+Prints the table in [BENCHMARKS.md](BENCHMARKS.md): build times at one and all
 threads, the phase breakdown, compression, query percentiles, and peak memory
 for both build strategies. It also checks that the block build's output is
 byte-identical to the in-memory build's, and says so in the table.
@@ -183,7 +183,7 @@ to see the shape of the output:
 ./tools/bench.sh corpus/fixtures tests/fixtures/queries/basic.txt
 ```
 
-Your numbers will differ from the published ones — different machine, different
+Your numbers will differ from the published ones: different machine, different
 dump. The relationships are what should hold: the block build should use a
 fraction of the memory, and startup should be milliseconds rather than seconds.
 

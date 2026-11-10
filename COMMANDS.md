@@ -39,7 +39,7 @@ strategies, byte-identity check.
 
 Per-query latency and result counts, which queries returned nothing, score
 distribution, latency histogram. Needs a built index (`.idx`), not a `.corpus`
-file — pass the corpus and it will just answer slowly by rebuilding first.
+file. Pass the corpus and it will still answer, slowly, by rebuilding first.
 
 ## Build an index
 

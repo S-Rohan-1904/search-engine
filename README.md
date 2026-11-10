@@ -1,7 +1,7 @@
 # search
 
-A search engine written from scratch in C++20 — crawler, indexer, ranker and
-query language — with no search library underneath it. No Lucene, no Elastic,
+A search engine written from scratch in C++20: crawler, indexer, ranker and
+query language, with no search library underneath it. No Lucene, no Elastic,
 no third-party index. The standard library, and libcurl for HTTP.
 
 It indexes 278,214 Wikipedia documents in 9 seconds, answers a query in 1.4 ms,
@@ -43,7 +43,7 @@ full Porter stemmer implemented step by step, and stopword removal.
 
 **Index.** Positional inverted index. Delta-encoded, variable-byte compressed,
 5.46x smaller than a flat encoding. Built in parallel across threads with a
-deterministic merge — the same bytes for any thread count. Incremental updates
+deterministic merge, giving the same bytes for any thread count. Incremental updates
 re-analyze only documents whose content hash changed.
 
 **Query language.** `AND`, `OR`, `NOT`, parentheses, and `"quoted phrases"`,
@@ -70,7 +70,7 @@ with a search page and a JSON API.
 ## The parts worth reading
 
 **A memory-mapped index format.** Loading the index used to mean decoding all
-25.6 million postings into the heap — 2.2 GB from a 188 MB file, 3.5 seconds
+25.6 million postings into the heap: 2.2 GB from a 188 MB file, 3.5 seconds
 before the first query could run. The format now stores fixed-width tables for
 the per-document arrays and a sorted table of term offsets, so opening it is a
 `mmap` and a header read, finding a term is a binary search over mapped bytes,
@@ -82,8 +82,8 @@ latency unchanged.**
 for a 188 MB index, which caps corpus size for reasons that have nothing to do
 with the disk. `index-build` indexes a block of documents at a time, writes
 each block, and merges the blocks in one pass over sorted term streams. Peak
-memory becomes a function of block size — 0.72 GB at 5,000 documents per block
-— and **the output is byte-identical to the in-memory build's at every block
+memory becomes a function of block size (0.72 GB at 5,000 documents per block),
+and **the output is byte-identical to the in-memory build's at every block
 size**, which is what makes the two interchangeable.
 
 **Two quadratic bugs that only a real corpus exposes.** Both were invisible on
@@ -93,7 +93,7 @@ inside the BM25 inner loop. Ten queries ran past ten minutes. They are the
 reason the build takes seconds and the query milliseconds.
 
 **Skip pointers, measured and rejected.** Galloping search in postings
-intersection — the textbook optimisation — made intersection-heavy queries
+intersection, the textbook optimisation, made intersection-heavy queries
 *twice as slow*. The scan was never the cost; decoding the postings was. The
 attempt and the reason are kept rather than quietly dropped.
 
