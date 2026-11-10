@@ -98,6 +98,24 @@ void write_links(const std::filesystem::path& directory,
     }
 }
 
+void write_urls(const std::filesystem::path& directory,
+                const std::unordered_map<std::string, std::size_t>& document_of) {
+    std::vector<std::pair<std::size_t, std::string>> rows;
+    rows.reserve(document_of.size());
+    for (const auto& [url, ordinal] : document_of) {
+        rows.emplace_back(ordinal, url);
+    }
+    std::sort(rows.begin(), rows.end());
+
+    std::ofstream out(directory / "urls.tsv");
+    if (!out) {
+        return;
+    }
+    for (const auto& [ordinal, url] : rows) {
+        out << document_name(ordinal) << "\t" << url << "\n";
+    }
+}
+
 void write_page(const std::filesystem::path& directory, std::size_t ordinal,
                 const CrawledPage& page) {
     std::ofstream out(directory / (document_name(ordinal) + ".txt"));
@@ -174,6 +192,9 @@ std::vector<CrawledPage> crawl(const Url& seed, Fetcher& fetcher, const CrawlOpt
                 if (options.same_host_only && target->host != seed.host) {
                     continue;
                 }
+                if (!target->path.starts_with(options.path_prefix)) {
+                    continue;
+                }
                 outgoing.push_back(url_to_string(*target));
                 frontier.push(*target, entry->depth + 1);
             }
@@ -193,6 +214,7 @@ std::vector<CrawledPage> crawl(const Url& seed, Fetcher& fetcher, const CrawlOpt
 
     if (options.output_dir.has_value()) {
         write_links(*options.output_dir, document_of, link_pairs);
+        write_urls(*options.output_dir, document_of);
     }
 
     return pages;

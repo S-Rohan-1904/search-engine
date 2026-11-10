@@ -13,3 +13,4 @@ corpus/wikipedia/
 corpus/beir/
 *.xml.gz
 *.json.gz
+corpus/crawl/

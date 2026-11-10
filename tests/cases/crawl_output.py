@@ -60,6 +60,16 @@ CASES = [
         "stdout": "documents: 2\nterms: 27\npostings: 30",
     },
     {
+        "name": "a path prefix keeps the crawl inside one part of a site",
+        "argv": ["crawl", "--mirror", "tests/fixtures/site", "--prefix", "/deep/", "http://example.com/"],
+        "stdout": "0 200 http://example.com/\n1 200 http://example.com/deep/c.html",
+    },
+    {
+        "name": "the prefix is matched against the path, not the whole url",
+        "argv": ["crawl", "--mirror", "tests/fixtures/site", "--prefix", "/private", "http://example.com/"],
+        "stdout": "0 200 http://example.com/\n1 200 http://example.com/private/public.html",
+    },
+    {
         "name": "a bad seed is reported before anything is written",
         "argv": ["crawl", "--mirror", "tests/fixtures/site", "--out", "build/crawled-bad", "ftp://x/"],
         "exit_code": 1,
