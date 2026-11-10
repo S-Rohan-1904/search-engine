@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "complete.hpp"
 #include "corpus.hpp"
 #include "http.hpp"
 #include "index.hpp"
@@ -34,6 +35,8 @@ private:
     HttpResponse html(const Answer& answer) const;
     HttpResponse json(const Answer& answer) const;
     const BkTree& tree();
+    const Trie& trie();
+    HttpResponse completions(const HttpRequest& request);
 
     const InvertedIndex& index_;
     const CorpusReader* corpus_;
@@ -41,6 +44,7 @@ private:
     std::unordered_map<std::string, std::string> urls_;
     QueryOptions defaults_;
     std::optional<BkTree> tree_;
+    std::optional<Trie> trie_;
 };
 
 std::unordered_map<std::string, std::string> read_urls(const std::string& path);

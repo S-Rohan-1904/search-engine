@@ -13,14 +13,25 @@
 #include <iostream>
 #include <sstream>
 
+#include "normalize.hpp"
+
 namespace {
 
 const char* const kStyle =
     "body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;"
     "color:#1d1d1f;background:#fff}"
     "form{display:flex;gap:.5rem;margin-bottom:1.5rem}"
-    "input[name=q]{flex:1;font:inherit;padding:.5rem .75rem;border:1px solid #c7c7cc;"
-    "border-radius:6px}"
+    ".box{position:relative;flex:1}"
+    "input[name=q]{width:100%;box-sizing:border-box;font:inherit;padding:.5rem .75rem;"
+    "border:1px solid #c7c7cc;border-radius:6px}"
+    "#suggest{position:absolute;left:0;right:0;top:100%;margin:2px 0 0;padding:.25rem 0;"
+    "list-style:none;background:#fff;border:1px solid #c7c7cc;border-radius:6px;"
+    "box-shadow:0 4px 12px rgba(0,0,0,.08);z-index:1}"
+    "#suggest[hidden]{display:none}"
+    "#suggest li{margin:0;padding:.35rem .75rem;cursor:pointer;display:flex;"
+    "justify-content:space-between;gap:1rem}"
+    "#suggest li span{color:#6e6e73;font-size:.8rem}"
+    "#suggest li[aria-selected=true]{background:#d4e4f7}"
     "button{font:inherit;padding:.5rem 1rem;border:0;border-radius:6px;background:#0a66c2;"
     "color:#fff}"
     "ol{padding-left:1.25rem}li{margin-bottom:1.25rem}"
@@ -29,7 +40,40 @@ const char* const kStyle =
     ".snippet{margin:.25rem 0 0}.note{color:#6e6e73}"
     "@media (prefers-color-scheme:dark){body{color:#f5f5f7;background:#1c1c1e}"
     "input[name=q]{background:#2c2c2e;color:#f5f5f7;border-color:#48484a}"
+    "#suggest{background:#2c2c2e;border-color:#48484a}#suggest li span{color:#a1a1a6}"
+    "#suggest li[aria-selected=true]{background:#1f3d63}"
     ".url{color:#4ac26b}.score,.note{color:#a1a1a6}a{color:#6cb6ff}}";
+
+const char* const kScript =
+    "(()=>{const input=document.querySelector('input[name=q]');"
+    "const list=document.getElementById('suggest');let items=[];let active=-1;let timer=0;"
+    "let token=0;"
+    "const split=v=>{const m=v.match(/^(.*?)([^\\s()\"]*)$/);return [m[1],m[2]];};"
+    "const close=()=>{list.hidden=true;active=-1;input.setAttribute('aria-expanded','false');"
+    "input.removeAttribute('aria-activedescendant');};"
+    "const mark=()=>{[...list.children].forEach((li,i)=>li.setAttribute('aria-selected',"
+    "i===active?'true':'false'));if(active>=0){input.setAttribute('aria-activedescendant',"
+    "'suggest-'+active);}else{input.removeAttribute('aria-activedescendant');}};"
+    "const pick=i=>{const [head]=split(input.value);input.value=head+items[i].term+' ';"
+    "close();input.focus();};"
+    "const show=data=>{items=data.completions;list.replaceChildren();"
+    "items.forEach((c,i)=>{const li=document.createElement('li');li.id='suggest-'+i;"
+    "li.setAttribute('role','option');li.append(c.term);const n=document.createElement('span');"
+    "n.textContent=c.documents+(c.documents===1?' doc':' docs');li.append(n);"
+    "li.addEventListener('mousedown',e=>{e.preventDefault();pick(i);});list.append(li);});"
+    "active=-1;mark();list.hidden=items.length===0;"
+    "input.setAttribute('aria-expanded',items.length?'true':'false');};"
+    "input.addEventListener('input',()=>{clearTimeout(timer);const [,word]=split(input.value);"
+    "if(word.length<2){close();return;}const mine=++token;timer=setTimeout(()=>{"
+    "fetch('/api/complete?limit=8&q='+encodeURIComponent(word)).then(r=>r.json())"
+    ".then(d=>{if(mine===token){show(d);}}).catch(close);},120);});"
+    "input.addEventListener('keydown',e=>{if(list.hidden){return;}"
+    "if(e.key==='ArrowDown'){e.preventDefault();active=(active+1)%items.length;mark();}"
+    "else if(e.key==='ArrowUp'){e.preventDefault();"
+    "active=(active-1+items.length)%items.length;mark();}"
+    "else if((e.key==='Enter'||e.key==='Tab')&&active>=0){e.preventDefault();pick(active);}"
+    "else if(e.key==='Escape'){close();}});"
+    "input.addEventListener('blur',()=>setTimeout(close,100));})();";
 
 bool parse_weight(const std::string& text, double& out) {
     try {
@@ -87,9 +131,12 @@ std::string page(const std::string& query, const std::string& content) {
         << "<title>" << (query.empty() ? "Search" : html_escape(query) + " - Search")
         << "</title><style>" << kStyle << "</style></head><body>"
         << "<form action=\"/search\" method=\"get\" role=\"search\">"
-        << "<input name=\"q\" value=\"" << html_escape(query)
-        << "\" aria-label=\"Query\" autofocus><button type=\"submit\">Search</button></form>"
-        << content << "</body></html>\n";
+        << "<div class=\"box\"><input name=\"q\" value=\"" << html_escape(query)
+        << "\" aria-label=\"Query\" autocomplete=\"off\" role=\"combobox\""
+        << " aria-autocomplete=\"list\" aria-controls=\"suggest\" aria-expanded=\"false\""
+        << " autofocus><ul id=\"suggest\" role=\"listbox\" hidden></ul></div>"
+        << "<button type=\"submit\">Search</button></form>" << content << "<script>" << kScript
+        << "</script></body></html>\n";
     return out.str();
 }
 
@@ -113,6 +160,39 @@ const BkTree& SearchService::tree() {
         tree_ = build_bk_tree(index_);
     }
     return *tree_;
+}
+
+const Trie& SearchService::trie() {
+    if (!trie_.has_value()) {
+        trie_ = build_trie(index_);
+    }
+    return *trie_;
+}
+
+HttpResponse SearchService::completions(const HttpRequest& request) {
+    const auto q = request.query.find("q");
+    const std::string prefix = q == request.query.end() ? std::string() : q->second;
+
+    std::size_t limit = 8;
+    const auto asked = request.query.find("limit");
+    if (asked != request.query.end() && !parse_limit(asked->second, limit)) {
+        return HttpResponse{400, "application/json",
+                            "{\"error\":\"limit must be a whole number from 1 to 100\"}\n"};
+    }
+
+    const std::string term = normalize(prefix);
+    std::ostringstream out;
+    out << "{\"prefix\":\"" << json_escape(term) << "\",\"completions\":[";
+    if (!term.empty()) {
+        bool first = true;
+        for (const Completion& completion : trie().complete(term, limit)) {
+            out << (first ? "" : ",") << "{\"term\":\"" << json_escape(completion.term)
+                << "\",\"documents\":" << completion.document_frequency << "}";
+            first = false;
+        }
+    }
+    out << "]}\n";
+    return HttpResponse{200, "application/json", out.str()};
 }
 
 std::string SearchService::title_of(const std::string& document_id) const {
@@ -253,6 +333,9 @@ HttpResponse SearchService::handle(const HttpRequest& request) {
     }
     if (request.path == "/api/search") {
         return json(answer(request));
+    }
+    if (request.path == "/api/complete") {
+        return completions(request);
     }
     return HttpResponse{404, "text/plain; charset=utf-8", "not found\n"};
 }
