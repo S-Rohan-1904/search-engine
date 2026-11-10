@@ -70,6 +70,11 @@ CASES = [
         "stdout": "0 200 http://example.com/\n1 200 http://example.com/private/public.html",
     },
     {
+        "name": "a per-host cap spreads a crawl across sites",
+        "argv": ["crawl", "--mirror", "tests/fixtures/site", "--all-hosts", "--max-per-host", "2", "http://example.com/"],
+        "stdout": "0 200 http://example.com/\n1 200 http://example.com/a.html\n1 200 http://other.example/away.html",
+    },
+    {
         "name": "a bad seed is reported before anything is written",
         "argv": ["crawl", "--mirror", "tests/fixtures/site", "--out", "build/crawled-bad", "ftp://x/"],
         "exit_code": 1,

@@ -147,6 +147,7 @@ int usage() {
                  "      --user-agent <name>      the name robots.txt is matched against\n"
                  "      --all-hosts              follow links off the seed host\n"
                  "      --prefix <path>          follow only links whose path starts with this\n"
+                 "      --max-per-host <n>       queue at most n pages from any one host\n"
                  "  serve [--stdin] [--port <n>] [query options] <source>\n"
                  "                               search from a browser on 127.0.0.1\n"
                  "\n"
@@ -1558,6 +1559,12 @@ int cmd_crawl(const std::vector<std::string>& args) {
             options.user_agent = value;
         } else if (flag == "--prefix") {
             options.path_prefix = value;
+        } else if (flag == "--max-per-host") {
+            if (!parse_count(value, options.max_per_host)) {
+                std::cerr << "search: max-per-host must be a non-negative integer: " << value
+                          << "\n";
+                return 1;
+            }
         } else if (flag == "--max-pages") {
             if (!parse_count(value, options.max_pages)) {
                 std::cerr << "search: max-pages must be a non-negative integer: " << value << "\n";

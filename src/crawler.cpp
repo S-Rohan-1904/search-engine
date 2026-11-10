@@ -150,7 +150,9 @@ std::vector<CrawledPage> crawl(const Url& seed, Fetcher& fetcher, const CrawlOpt
         std::filesystem::create_directories(*options.output_dir, ec);
     }
 
+    std::unordered_map<std::string, std::size_t> queued_per_host;
     frontier.push(seed, 0);
+    queued_per_host[seed.host] = 1;
 
     while (const std::optional<FrontierEntry> entry = frontier.pop()) {
         const Url& url = entry->url;
@@ -196,7 +198,13 @@ std::vector<CrawledPage> crawl(const Url& seed, Fetcher& fetcher, const CrawlOpt
                     continue;
                 }
                 outgoing.push_back(url_to_string(*target));
-                frontier.push(*target, entry->depth + 1);
+                std::size_t& queued = queued_per_host[target->host];
+                if (options.max_per_host != 0 && queued >= options.max_per_host) {
+                    continue;
+                }
+                if (frontier.push(*target, entry->depth + 1)) {
+                    queued++;
+                }
             }
         }
 

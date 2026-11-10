@@ -18,6 +18,7 @@ struct CrawlOptions {
     std::string user_agent = "searchbot";
     bool same_host_only = true;
     std::string path_prefix;
+    std::size_t max_per_host = 0;
     std::chrono::milliseconds min_delay{500};         // floor between requests to one host
     std::optional<std::filesystem::path> output_dir;  // write a corpus when set
 };
