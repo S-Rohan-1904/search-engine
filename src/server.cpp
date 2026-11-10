@@ -162,6 +162,11 @@ const BkTree& SearchService::tree() {
     return *tree_;
 }
 
+void SearchService::warm() {
+    tree();
+    trie();
+}
+
 const Trie& SearchService::trie() {
     if (!trie_.has_value()) {
         trie_ = build_trie(index_);

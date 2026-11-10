@@ -20,6 +20,8 @@ public:
 
     HttpResponse handle(const HttpRequest& request);
 
+    void warm();
+
 private:
     struct Answer {
         std::string query;

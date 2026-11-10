@@ -5,6 +5,7 @@
 
 #include "analyzer.hpp"
 #include "edit_distance.hpp"
+#include "evaluator.hpp"
 #include "query.hpp"
 
 void BkTree::insert(std::string term, std::size_t document_frequency) {
@@ -91,19 +92,35 @@ BkTree build_bk_tree(const InvertedIndex& index) {
 
 namespace {
 
-std::optional<std::string> correct_word(const std::string& word, const InvertedIndex& index,
-                                        const BkTree& tree) {
+struct Correction {
+    std::string term;
+    bool word_was_indexed;
+};
+
+std::optional<Correction> correct_word(const std::string& word, const InvertedIndex& index,
+                                       const BkTree& tree) {
+    constexpr std::size_t kRareRatio = 100;
+    constexpr std::size_t kRareMinimumLength = 4;
+
     const std::vector<Token> analyzed = analyze(word);
-    if (analyzed.size() != 1 || index.document_frequency(analyzed.front().text) != 0) {
+    if (analyzed.size() != 1) {
         return std::nullopt;
     }
 
     const std::string& term = analyzed.front().text;
+    const std::size_t frequency = index.document_frequency(term);
+    if (frequency != 0 && term.size() < kRareMinimumLength) {
+        return std::nullopt;
+    }
+
     const std::size_t max_distance = term.size() <= 4 ? 1 : 2;
-    for (const Suggestion& suggestion : tree.search(term, max_distance, 5)) {
+    for (const Suggestion& suggestion : tree.search(term, max_distance, 10)) {
+        if (suggestion.distance == 0 || suggestion.document_frequency < kRareRatio * frequency) {
+            continue;
+        }
         const std::vector<Token> again = analyze(suggestion.term);
         if (again.size() == 1 && again.front().text == suggestion.term) {
-            return suggestion.term;
+            return Correction{suggestion.term, frequency != 0};
         }
     }
     return std::nullopt;
@@ -139,12 +156,23 @@ std::optional<std::string> correct_query(std::string_view query, const InvertedI
         return std::nullopt;
     }
 
+    constexpr std::size_t kFewMatches = 5;
+    std::optional<bool> few_matches;
+    const auto finds_little = [&]() {
+        if (!few_matches.has_value()) {
+            const ParseResult parsed = parse_query(query);
+            few_matches = !parsed.root || evaluate(*parsed.root, index).size() < kFewMatches;
+        }
+        return *few_matches;
+    };
+
     bool changed = false;
     std::string corrected;
     for (QueryToken& token : tokens) {
         if (token.kind == QueryTokenKind::Term) {
-            if (const std::optional<std::string> better = correct_word(token.text, index, tree)) {
-                token.text = *better;
+            const std::optional<Correction> better = correct_word(token.text, index, tree);
+            if (better.has_value() && (!better->word_was_indexed || finds_little())) {
+                token.text = better->term;
                 changed = true;
             }
         }

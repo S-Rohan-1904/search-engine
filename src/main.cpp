@@ -661,6 +661,9 @@ int cmd_serve(const std::vector<std::string>& args) {
         return 0;
     }
 
+    std::cout << "building spelling and completion tables..." << std::endl;
+    service.warm();
+
     if (!serve(service, static_cast<int>(port), error)) {
         std::cerr << "search: " << error << "\n";
         return 1;

@@ -172,6 +172,29 @@ CASES = [
         "stdout": "planet 3\nplan 1",
     },
     {
+        "name": "a corpus with one misspelling among a hundred correct spellings",
+        "argv": ["beir-import", "tests/fixtures/spelling/corpus.jsonl", "build/spelling.corpus"],
+        "stdout": "lines 101\ndocuments 101\nskipped 0",
+    },
+    {
+        "name": "a word that is indexed but rare is corrected when the query finds nothing",
+        "argv": ["repl", "--limit", "1", "build/spelling.corpus"],
+        "stdin": "solar systm\n",
+        "stdout": "did you mean: solar system",
+    },
+    {
+        "name": "or almost nothing",
+        "argv": ["repl", "--limit", "1", "build/spelling.corpus"],
+        "stdin": "systm\n",
+        "stdout": "did you mean: system\n1. t000  4.9785",
+    },
+    {
+        "name": "but left alone when the query as typed finds plenty",
+        "argv": ["repl", "--limit", "1", "build/spelling.corpus"],
+        "stdin": "systm OR solar\n",
+        "stdout": "1. t000  4.9785",
+    },
+    {
         "name": "repl with no source is rejected",
         "argv": ["repl"],
         "exit_code": 2,
