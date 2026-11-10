@@ -19,6 +19,7 @@ struct CrawlOptions {
     bool same_host_only = true;
     std::string path_prefix;
     std::size_t max_per_host = 0;
+    std::size_t concurrency = 1;
     std::chrono::milliseconds min_delay{500};         // floor between requests to one host
     std::optional<std::filesystem::path> output_dir;  // write a corpus when set
 };

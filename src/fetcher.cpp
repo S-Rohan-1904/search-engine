@@ -51,6 +51,10 @@ public:
         return FetchResult{200, extension_content_type(path), std::move(body)};
     }
 
+    std::unique_ptr<Fetcher> clone() const override {
+        return std::make_unique<FileFetcher>(root_);
+    }
+
 private:
     std::filesystem::path root_;
 };
@@ -68,6 +72,10 @@ public:
     CurlFetcher(std::string user_agent, long timeout_seconds)
         : user_agent_(std::move(user_agent)), timeout_seconds_(timeout_seconds) {
         handle_ = curl_easy_init();
+    }
+
+    std::unique_ptr<Fetcher> clone() const override {
+        return std::make_unique<CurlFetcher>(user_agent_, timeout_seconds_);
     }
 
     ~CurlFetcher() override {

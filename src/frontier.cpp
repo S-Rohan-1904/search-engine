@@ -27,3 +27,20 @@ std::optional<FrontierEntry> Frontier::pop() {
     issued_++;
     return entry;
 }
+
+std::optional<FrontierEntry> Frontier::pop_first(
+    const std::function<bool(const FrontierEntry&)>& wanted) {
+    if (issued_ >= max_pages_) {
+        return std::nullopt;
+    }
+
+    for (auto it = queue_.begin(); it != queue_.end(); ++it) {
+        if (wanted(*it)) {
+            FrontierEntry entry = std::move(*it);
+            queue_.erase(it);
+            issued_++;
+            return entry;
+        }
+    }
+    return std::nullopt;
+}

@@ -75,6 +75,23 @@ CASES = [
         "stdout": "0 200 http://example.com/\n1 200 http://example.com/a.html\n1 200 http://other.example/away.html",
     },
     {
+        "name": "a concurrent crawl fetches different hosts side by side",
+        "argv": ["crawl", "--mirror", "tests/fixtures/site", "--all-hosts", "--concurrency", "4", "--out", "build/crawled-par", "http://example.com/"],
+        "stdout": "0 200 http://example.com/\n1 200 http://example.com/a.html\n1 200 http://other.example/away.html\n"
+                  "1 200 http://example.com/b.html\n1 200 http://example.com/deep/c.html\n1 200 http://example.com/private/public.html",
+    },
+    {
+        "name": "and keeps the same pages a one-at-a-time crawl does",
+        "argv": ["index-stats", "build/crawled-par"],
+        "stdout": "documents: 6\nterms: 41\npostings: 50",
+    },
+    {
+        "name": "a concurrency of zero is rejected",
+        "argv": ["crawl", "--concurrency", "0", "http://example.com/"],
+        "exit_code": 1,
+        "stderr_not_empty": True,
+    },
+    {
         "name": "a bad seed is reported before anything is written",
         "argv": ["crawl", "--mirror", "tests/fixtures/site", "--out", "build/crawled-bad", "ftp://x/"],
         "exit_code": 1,

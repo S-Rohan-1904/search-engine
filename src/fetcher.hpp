@@ -23,6 +23,7 @@ class Fetcher {
 public:
     virtual ~Fetcher() = default;
     virtual std::optional<FetchResult> get(const Url& url) = 0;
+    virtual std::unique_ptr<Fetcher> clone() const = 0;
 };
 
 // Serves a mirrored site from the filesystem.

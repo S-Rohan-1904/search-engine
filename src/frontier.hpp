@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <deque>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -39,6 +40,8 @@ public:
     bool push(const Url& url, std::size_t depth);
 
     std::optional<FrontierEntry> pop();
+    std::optional<FrontierEntry> pop_first(const std::function<bool(const FrontierEntry&)>& wanted);
+    bool empty() const { return queue_.empty() || issued_ >= max_pages_; }
 
     // How many URLs have been handed out by pop().
     std::size_t issued() const { return issued_; }
